@@ -367,8 +367,8 @@ def test_invalid_branch_never_runs_engine(repo, credentials, branch):
     assert all(c.closed for c in clients)
 
 
-def test_real_remote_engine_initialization_noop_and_client_release(
-    repo, tmp_path, credentials, monkeypatch
+def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
+    repo, tmp_path, credentials, monkeypatch, capsys
 ):
     import httpx
     from test_engine import FakeProvider
@@ -378,6 +378,9 @@ def test_real_remote_engine_initialization_noop_and_client_release(
 
     configuration(repo)
     source = source_repo(tmp_path)
+    excluded = ".run/SYNTHETIC_EXCLUDED_CASE/run.xml"
+    tracked(source, excluded, "synthetic non-document fixture\n")
+    git(source, "commit", "-m", "Add excluded synthetic fixture")
     original = subprocess.run
 
     def invoke(args, **kwargs):
@@ -414,20 +417,42 @@ def test_real_remote_engine_initialization_noop_and_client_release(
             self.closes += 1
 
     provider = Provider()
-    first = gha().execute(
-        "wiki-rag.toml",
-        workspace=repo,
-        remote_factory=remote,
-        provider_factory=lambda cfg: provider,
-    )
-    second = gha().execute(
-        "wiki-rag.toml",
-        workspace=repo,
-        remote_factory=remote,
-        provider_factory=lambda cfg: provider,
-    )
+    module = gha()
+    execute = module.execute
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "workflow-output"))
+
+    def prepared(config, **kwargs):
+        return execute(
+            config, **kwargs, remote_factory=remote, provider_factory=lambda cfg: provider
+        )
+
+    monkeypatch.setattr(module, "execute", prepared)
+
+    def run(mode):
+        assert module.main(["--mode", mode]) == 0
+        text = capsys.readouterr().out
+        assert "SYNTHETIC_EXCLUDED_CASE" not in text
+        assert excluded not in text and "nested/readme.md" not in text
+        return json.loads(text)
+
+    preview = run("plan")
+    assert preview["collections"]["docs0"]["selected_files"] == 1
+    assert preview["collections"]["docs0"]["skipped_files"] >= 1
+    assert provider.uploads == 0
+    first = run("sync")
+    assert "nested/readme.md" in authority.manifest["collections"]["docs0"]["files"]
+    second = run("sync")
     assert first["publication_id"] == second["publication_id"]
     assert provider.uploads == 1 and provider.closes == 2
+    (source / "nested/readme.md").unlink()
+    git(source, "add", "--", "nested/readme.md")
+    git(source, "commit", "-m", "Remove selected synthetic document")
+    deleted = run("sync")
+    assert deleted["collections"]["docs0"]["changes"]["delete"] == 1
+    assert authority.manifest["collections"]["docs0"]["files"] == {}
+    assert provider.files == {} and "file-1" in provider.deleted
+    assert provider.closes == 3
     assert all(c.client.is_closed for c in clients)
     assert not authority.held
 

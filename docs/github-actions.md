@@ -93,6 +93,14 @@ Workflow outputs:
 - `workspace`: selected workspace slug.
 - `publication-id`: committed publication UUID for sync, empty for plan.
 
+Job logs contain aggregate counts, configured workspace/collection labels and Git
+revisions. Changed and excluded file paths, skip details and operation identifiers
+are omitted: even a file excluded from indexing can have a sensitive filename.
+This changes diagnostics only; selection, manifests and deletion reconciliation
+retain their complete internal data. The local composite uses `--summary` for the
+same output boundary. Detailed local CLI previews and status are intended for
+trusted local inspection, not CI logs.
+
 GitHub concurrency uses `cancel-in-progress: false`; concurrency groups are local to
 the caller repository. The Durable Object lease coordinates different callers.
 This workflow does not install cross-repository event delivery or guarantee a

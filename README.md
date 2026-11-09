@@ -53,6 +53,11 @@ interruption returns 130. In local mode, cleanup failures after a successful
 publication are reported as `cleanup_pending` in otherwise successful JSON output.
 Remote-mode cleanup failures exit with code 2 and report the committed publication ID.
 
+Use `--summary` with `plan`, `index` or `update` for aggregate log output without
+document or excluded-file paths. The GitHub Actions entry points use this boundary
+automatically; ordinary local CLI output remains detailed. Summaries retain
+configured workspace/collection labels, revisions and counts.
+
 For installation from a built wheel:
 
 ```sh

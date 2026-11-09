@@ -17,4 +17,4 @@ runs:
         CONFIG_PATH: ${{ github.workspace }}/${{ inputs.config }}
       run: |
         uv run --project "$GITHUB_ACTION_PATH/../../.." --frozen \
-          wiki-rag --config "$CONFIG_PATH" index --apply
+          wiki-rag --config "$CONFIG_PATH" index --apply --summary

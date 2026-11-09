@@ -6,6 +6,7 @@ import sys
 
 from .config import RagError, load_config
 from .engine import run
+from .output import summarize
 
 
 def main(argv=None):
@@ -15,6 +16,10 @@ def main(argv=None):
     for name in ("plan", "index", "update", "status"):
         child = commands.add_parser(name)
         child.add_argument("--config", default=argparse.SUPPRESS, help="TOML config path")
+        if name in {"plan", "index", "update"}:
+            child.add_argument(
+                "--summary", action="store_true", help="print counts without source-file paths"
+            )
         if name in {"index", "update"}:
             child.add_argument(
                 "--apply", action="store_true", help="explicitly enable remote writes"
@@ -22,6 +27,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         result = run(load_config(args.config), args.command, apply=getattr(args, "apply", False))
+        if getattr(args, "summary", False):
+            result = summarize(result)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except RagError as exc:

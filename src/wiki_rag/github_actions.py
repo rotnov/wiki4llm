@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .config import RagError, lexical_path, load_config
+from .output import summarize
 from .provider import OpenAIProvider
 from .remote_engine import run_remote
 from .remote_state import RemoteState
@@ -252,7 +253,7 @@ def main(argv=None):
         if os.environ.get("GITHUB_OUTPUT"):
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
                 stream.write(f"workspace={result['workspace']}\npublication-id={publication}\n")
-        print(json.dumps(result, indent=2))
+        print(json.dumps(summarize(result), indent=2))
         return 0
     except RagError as exc:
         print(f"wiki-rag: {exc}", file=sys.stderr)
