@@ -1,0 +1,52 @@
+# Consumer template only. Install reviewed tool source at tools/wiki-rag in
+# the orchestrator repository before enabling. Pin that source to a reviewed commit.
+name: Ingest documentation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wiki-rag-team-docs
+  cancel-in-progress: false
+jobs:
+  ingest:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: wiki-rag-publisher
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+      # Repeat an explicit full-history branch checkout for EVERY TOML collection.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: example/guide
+          ref: main
+          path: sources/guide
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+          token: ${{ secrets.DOCS_CONTENTS_READ_TOKEN }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: example/reference
+          ref: main
+          path: sources/reference
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+          token: ${{ secrets.DOCS_CONTENTS_READ_TOKEN }}
+      - uses: ./tools/wiki-rag/.github/actions/ingest
+        with:
+          config: wiki-rag.remote.toml
+        env:
+          WIKI_RAG_GATE_ORIGIN: ${{ vars.WIKI_RAG_GATE_ORIGIN }}
+          WIKI_RAG_ACCESS_CLIENT_ID: ${{ secrets.WIKI_RAG_ACCESS_CLIENT_ID }}
+          WIKI_RAG_ACCESS_CLIENT_SECRET: ${{ secrets.WIKI_RAG_ACCESS_CLIENT_SECRET }}
+          WIKI_RAG_INGEST_KEY: ${{ secrets.WIKI_RAG_INGEST_KEY }}

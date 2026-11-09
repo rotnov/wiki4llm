@@ -1,0 +1,21 @@
+version = 1
+state = ".wiki-rag"
+max_file_bytes = 2000000
+max_total_bytes = 50000000
+max_files = 10000
+chunk_size = 800
+chunk_overlap = 400
+
+[openai]
+project_id = "proj_example"
+api_key_env = "WIKI_RAG_INGEST_KEY"
+
+[[collections]]
+name = "handbook"
+repository = "example/handbook"
+root = "../handbook"
+branch = "main"
+vector_store_id = "vs_example"
+include = ["README.md", "docs/**"]
+extensions = [".md", ".txt", ".rst", ".pdf"]
+exclude = ["docs/private/**", "docs/generated/**"]

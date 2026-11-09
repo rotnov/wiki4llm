@@ -1,0 +1,18 @@
+{
+  "workspace": "team-docs",
+  "binding": {
+    "projectId": "proj_example",
+    "credentialEnv": "OPENAI_QUERY_KEY",
+    "stores": { "guide": "vs_example" }
+  },
+  "ownership": {
+    "project_id": "proj_example",
+    "collections": {
+      "guide": {
+        "repository": "example/guide",
+        "branch": "main",
+        "vector_store_id": "vs_example"
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+name: Verify wiki4llm
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: "3.14"
+          enable-cache: false
+      - name: Install pinned dependencies
+        run: |
+          uv sync --frozen
+          npm ci --prefix gate
+      - name: Verify Python and cross-language behavior
+        env:
+          WIKI_RAG_GATE_SOURCE: ${{ github.workspace }}/gate
+        run: |
+          uv run pytest -q
+          uv run ruff check .
+          uv run ruff format --check .
+          uv build
+          uv run python scripts/check_public.py
+      - name: Verify distribution contents
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+          blocked = {"node_modules", ".data", ".smoke", ".venv", ".git", ".wrangler", ".worker-build", "data", "sources"}
+          artifacts = [*Path("dist").glob("*.whl"), *Path("dist").glob("*.tar.gz")]
+          assert len(artifacts) == 2, "Expected one wheel and one source archive"
+          for artifact in artifacts:
+              with (zipfile.ZipFile(artifact) if artifact.suffix == ".whl" else tarfile.open(artifact)) as archive:
+                  names = archive.namelist() if artifact.suffix == ".whl" else archive.getnames()
+              for name in names:
+                  assert not (set(name.split("/")) & blocked), "Private/cache entry in distribution"
+                  assert not any(part.startswith(".env") for part in name.split("/")), "Environment file in distribution"
+          print("Distribution contents verified")
+          PY
+      - name: Verify gate runtimes and documentation
+        run: |
+          npm --prefix gate run check
+          npm --prefix gate run build
+          npm --prefix gate test
+          npm --prefix gate run check:worker
+          npm --prefix gate run test:worker
+          npm --prefix gate run check:bundle
+          npm --prefix gate run dry-run:worker
+          npm --prefix gate run format:check
+          npm --prefix gate run check:docs

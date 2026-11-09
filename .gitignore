@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+.wiki-rag/
+.env*
+*.egg-info/
+
+.smoke/
+
+# Monorepo build tools also use this root ignore file when assembling sdists.
+node_modules/
+.data/
+.worker-build/
+.wrangler/
+.coverage/
+data/
+sources/

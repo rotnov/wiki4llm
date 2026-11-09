@@ -1,0 +1,5 @@
+{
+  "id": "reader",
+  "grants": { "allow": ["team-docs"], "deny": [] },
+  "enabled": true
+}

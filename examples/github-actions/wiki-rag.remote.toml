@@ -1,0 +1,33 @@
+version = 1
+max_files = 10000
+
+[remote_state]
+origin_env = "WIKI_RAG_GATE_ORIGIN"
+workspace = "team-docs"
+client_id_env = "WIKI_RAG_ACCESS_CLIENT_ID"
+client_secret_env = "WIKI_RAG_ACCESS_CLIENT_SECRET"
+lease_wait_seconds = 300
+
+[openai]
+project_id = "proj_example"
+api_key_env = "WIKI_RAG_INGEST_KEY"
+
+[[collections]]
+name = "guide"
+repository = "example/guide"
+root = "sources/guide"
+branch = "main"
+vector_store_id = "vs_guide"
+include = ["docs/**/*.md", "README.md"]
+exclude = []
+extensions = [".md"]
+
+[[collections]]
+name = "reference"
+repository = "example/reference"
+root = "sources/reference"
+branch = "main"
+vector_store_id = "vs_reference"
+include = ["docs/**/*.md", "README.md"]
+exclude = []
+extensions = [".md"]

@@ -1,0 +1,52 @@
+services:
+  wiki-rag-gate:
+    build:
+      context: .
+    image: wiki-rag-gate:local
+    init: true
+    user: "${WIKI_RAG_GATE_UID:-1000}:${WIKI_RAG_GATE_GID:-1000}"
+    command:
+      - serve
+      - --state
+      - /data
+      - --bind
+      - 0.0.0.0
+      - --authority
+      - "127.0.0.1:8787"
+      - --authority
+      - "${WIKI_RAG_GATE_AUTHORITY:-127.0.0.1:${WIKI_RAG_GATE_PORT:-8787}}"
+    ports:
+      - "127.0.0.1:${WIKI_RAG_GATE_PORT:-8787}:8787"
+    environment:
+      QMD_LLAMA_GPU: "${QMD_LLAMA_GPU:-off}"
+    volumes:
+      - type: bind
+        source: ${WIKI_RAG_GATE_DATA_DIR:-./data}
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WIKI_RAG_GATE_SOURCE_DIR:-./sources}
+        target: /sources
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 150s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/mcp').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

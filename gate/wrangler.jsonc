@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wiki-rag-gate",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "PUBLIC_ORIGIN": "https://gate.example.com",
+    "ACCESS_ISSUER": "https://example.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "replace-with-application-audience",
+    "ADMIN_IDENTITIES": "[]",
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "GATE", "class_name": "GateDurableObject" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GateDurableObject"] }],
+}

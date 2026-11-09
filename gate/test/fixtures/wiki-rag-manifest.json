@@ -1,0 +1,89 @@
+{
+  "collections": {
+    "guide": {
+      "branch": null,
+      "files": {
+        "README.md": {
+          "file_id": "file-1",
+          "kind": "md",
+          "operation_id": "67df34c19dd328e1c230f6c552a5f52bdf7b068de02ae5d51b7e99c196bb968b",
+          "path": "README.md",
+          "preprocessing": "utf8-text-v1",
+          "sha256": "fb5a5bb30ad44ec3750cf8d31df848f9b6d71ab64e590b476c0d8928643dc5e4",
+          "source_commit": "0e1b779dcfb082ae5e40079544be94892c019ec3",
+          "vector_store_id": "vs_test",
+          "version": "045f0bc3f3b385955592073cad462403e45ca04b4dc3242355ca05a57cb5867a"
+        },
+        "notes.rst": {
+          "file_id": "file-2",
+          "kind": "rst",
+          "operation_id": "7b066b5be9c571174d5d931e0e6d67f7d6d512ed3b4916a789c902dd3ff20815",
+          "path": "notes.rst",
+          "preprocessing": "utf8-text-v1",
+          "sha256": "2bad672c133de13fac6a97ba32b60c593b228534c5b48b53810186d7bd16e605",
+          "source_commit": null,
+          "vector_store_id": "vs_test",
+          "version": "42234ed04ac4211b7daf88b8c49ac2fde406ce8cee4ff24d5a141e87c105980a"
+        }
+      },
+      "processing": {
+        "chunking": {
+          "static": {
+            "chunk_overlap_tokens": 400,
+            "max_chunk_size_tokens": 800
+          },
+          "type": "static"
+        },
+        "preprocessing": "per-file-v1"
+      },
+      "repository": "example/guide",
+      "repository_commit": "0e1b779dcfb082ae5e40079544be94892c019ec3",
+      "vector_store_id": "vs_test"
+    },
+    "second": {
+      "branch": null,
+      "files": {
+        "README.md": {
+          "file_id": "file-3",
+          "kind": "md",
+          "operation_id": "957634bd4f26d2db24f310ccf32647fbe509637f16a79ea6715b8cf23e4b659f",
+          "path": "README.md",
+          "preprocessing": "utf8-text-v1",
+          "sha256": "44ea00664879d01d6b663de57f2a987d0e4471eacc9f315d257d03e6e584b220",
+          "source_commit": null,
+          "vector_store_id": "vs_second",
+          "version": "ba47db6d1565d2dcc8cbabfe36efd03718c1a83eb4b1cbcd2c963a858ae6b80e"
+        },
+        "manual.pdf": {
+          "file_id": "file-4",
+          "kind": "pdf",
+          "operation_id": "334ea12f14dc19ab39a542c8998ca6a96b51d892bd7efb37c6b3b0bf48ff292b",
+          "path": "manual.pdf",
+          "preprocessing": "pdf-native-v1",
+          "sha256": "f1026725d5896650952ec25879e054d6e9d6e55bcb9fc019015a0fd3dab7bc6b",
+          "source_commit": null,
+          "vector_store_id": "vs_second",
+          "version": "86b86428e1317898e4ed74d9e9340623df9e5985cc73d70f379bfcfe6bb67981"
+        }
+      },
+      "processing": {
+        "chunking": {
+          "static": {
+            "chunk_overlap_tokens": 400,
+            "max_chunk_size_tokens": 800
+          },
+          "type": "static"
+        },
+        "preprocessing": "per-file-v1"
+      },
+      "repository": "example/second",
+      "repository_commit": null,
+      "vector_store_id": "vs_second"
+    }
+  },
+  "generation": 1,
+  "project_id": "proj_test",
+  "publication_id": "ed46ac5c-0cb2-4737-bbf3-ebf2018054b9",
+  "published_at": "2026-11-08T10:29:12.688941+00:00",
+  "schema_version": 1
+}

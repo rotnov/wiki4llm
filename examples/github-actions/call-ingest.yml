@@ -1,0 +1,23 @@
+# Consumer installation template; replace the revision placeholders before use.
+# Replace BOTH REVIEWED_COMMIT_SHA occurrences with the same full 40-character SHA.
+# Replace main with the caller repository's default branch.
+name: Update project knowledge
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rag:
+    uses: rotnov/wiki4llm/.github/workflows/ingest.yml@REVIEWED_COMMIT_SHA
+    with:
+      tool-ref: REVIEWED_COMMIT_SHA
+      config: wiki-rag.toml
+      gate-origin: ${{ vars.WIKI_RAG_GATE_ORIGIN }}
+    secrets:
+      gate-client-id: ${{ secrets.RAG_CLIENT_ID }}
+      gate-token: ${{ secrets.RAG_TOKEN }}
+      openai-key: ${{ secrets.OPENAI_RAG_KEY }}
+      # Optional. Omit for the caller's repository and accessible public sources.
+      github-token: ${{ secrets.RAG_GITHUB_TOKEN }}

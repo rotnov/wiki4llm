@@ -1,0 +1,5 @@
+{
+  "key": "user:verified-access-subject",
+  "principal": "reader",
+  "enabled": true
+}

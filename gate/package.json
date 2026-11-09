@@ -1,0 +1,54 @@
+{
+  "name": "wiki-rag-gate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test test/*.test.ts",
+    "check": "tsc --noEmit",
+    "start": "node dist/src/cli.js serve",
+    "format": "prettier --write src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
+    "format:check": "prettier --check src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
+    "test:models": "tsx scripts/qualify-models.ts",
+    "test:compose": "tsx scripts/smoke-compose.ts",
+    "check:worker": "tsc -p tsconfig.worker.json",
+    "test:worker": "tsx --test test/cloudflare/*.test.ts",
+    "check:bundle": "tsx scripts/check-worker-bundle.ts",
+    "dry-run:worker": "wrangler deploy --dry-run --outdir .worker-build/wrangler",
+    "admin:worker": "tsx scripts/cloudflare-admin.ts",
+    "postinstall": "node scripts/repair-miniflare-types.ts",
+    "repair:tooling": "node scripts/repair-miniflare-types.ts",
+    "check:docs": "prettier --check ../README.md ../AGENTS.md ../docs ../examples ../.github"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@tobilu/qmd": "2.8.3",
+    "jose": "6.2.15",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261108.1",
+    "@puppeteer/browsers": "3.2.6",
+    "@types/node": "24.19.2",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "prettier": "3.8.1",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.116.0"
+  },
+  "overrides": {
+    "zod": "$zod",
+    "@modelcontextprotocol/server": "2.3.0",
+    "node-llama-cpp": "3.22.3",
+    "miniflare": {
+      "undici": "7.30.1",
+      "sharp": "0.35.5"
+    }
+  }
+}

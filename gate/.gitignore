@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.data/
+.coverage/
+*.log
+.DS_Store
+
+data/
+sources/
+
+.wrangler/
+.worker-build/
+.dev.vars*
+.env*

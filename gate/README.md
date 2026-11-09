@@ -1,0 +1,108 @@
+# Wiki RAG Gate
+
+The authenticated MCP gateway component of wiki4llm for published OpenAI Retrieval workspaces, with QMD compatibility. QMD workspaces have separate SQLite indexes and share one lazily initialized model runtime. OpenAI workspaces use explicitly imported published manifests. Run the commands below from `gate/`. For the recommended hosted stack, start with
+[the deployment guide](../docs/deployment.md); for Worker operations, see
+[Cloudflare deployment](docs/deployment.md).
+
+## Quick start: OpenAI Retrieval
+
+Requires Node 24 or newer. Tested on macOS with Node 26.12.0. First publish a
+synthetic or authorized repository snapshot using the `wiki-rag` CLI in the repository root.
+Supply its project and collection/store IDs explicitly below, and make the named
+project query credential `WIKI_RAG_QUERY_KEY` available in the serving environment.
+
+```sh
+npm ci
+npm run build
+node dist/src/cli.js import-openai --id docs \
+  --manifest /absolute/path/to/manifest.json \
+  --project proj_example --credential-env WIKI_RAG_QUERY_KEY \
+  --store guide=vs_example
+node dist/src/cli.js principal --id reader --allow docs
+node dist/src/cli.js token --principal reader --name local-agent --out .data/reader.json
+npm start
+```
+
+Repeat `--store` for each published collection. Repeat the explicit import after a
+producer update. See [docs/openai-backend.md](docs/openai-backend.md) for the strict
+publication contract, parsed-content limits and opt-in synthetic qualification
+runner. An OpenAI-only gate does not initialize the native QMD runtime.
+
+Connect a Streamable HTTP MCP client to `http://127.0.0.1:8787/mcp` with `Authorization: Bearer {secret}` from the generated credential file. Credentials are printed only to that new file, mode 0600. The database stores SHA-256 hashes, not token values. Keep the credential file private. The default server rejects browser Origins, unexpected Host headers and all session IDs. Container mode adds an explicit bind address and exact authority allowlist; it does not disable bearer authentication.
+
+## QMD compatibility
+
+Local QMD sources remain supported in separate workspaces through the same tools:
+
+```sh
+node dist/src/cli.js workspace --id team-a --source docs=/absolute/path/to/docs
+node dist/src/cli.js principal --id team-a-reader --allow 'team-a,team-a-*'
+node dist/src/cli.js index --id team-a
+node dist/src/cli.js token --principal team-a-reader --name local-agent --out .data/team-a.json
+```
+
+For QMD workspaces, use `query` with `mode: "lex"` for the model-free smoke test. `index --embed` additionally downloads and runs QMD embedding models. `vec` uses vectors with query expansion; `hybrid` (the default) also reranks candidates. These modes can load additional models. The default suite qualifies real lexical retrieval. Optional model qualification is available through `npm run test:models`; it is not a retrieval-quality or throughput benchmark. GPU memory consumption and the deployment platform require their own qualification.
+
+Every command accepts `--state /absolute/path/to/state` (default `.data`). `serve` accepts `--port` (default 8787), `--bind` (127.0.0.1 by default; 0.0.0.0 for containers), and repeatable `--authority` values for an exact Host allowlist. `index --id team-a` indexes one workspace; omit `--id` to index all QMD workspaces through one runtime. Repeat `--source collection=/path` to register several collections in a workspace. Re-registering a workspace replaces its source list; index again to publish the new content.
+
+## Access administration
+
+```sh
+node dist/src/cli.js principal --id reader --allow 'team-a,team-a-*' --deny 'team-a-secret'
+node dist/src/cli.js token --principal reader --name limited --allow team-a --days 7 --out .data/limited.json
+node dist/src/cli.js revoke --id {token-id}
+node dist/src/cli.js principal --id reader --disabled
+```
+
+Principal edits replace all rules. `*` grants all registered data workspaces; `team-a-*` grants descendants, not `team-a` itself. Deny overrides allow. Optional token rules intersect principal rules, never enlarge them. Expiry defaults to 30 days and is limited to 365 days. Each request checks current policy; revocation and grant removal also prevent release of an in-flight result. There are no remote administrative tools: filesystem ownership of the state directory is the administration boundary. An owner data token cannot issue credentials or modify grants.
+
+## MCP contract
+
+| Tool              | Purpose                                                     |
+| ----------------- | ----------------------------------------------------------- |
+| `list_workspaces` | Paginated authorized workspace names and indexed state      |
+| `query`           | Search authorized workspaces using `lex`, `vec` or `hybrid` |
+| `get`             | Read an exact workspace/generation-qualified reference      |
+| `multi_get`       | Read an explicit bounded list of qualified references       |
+| `status`          | Authorized workspace document/vector counts                 |
+
+Omitted workspace selection uses all effective grants, up to 20. Empty selection is rejected. An explicit unauthorized name rejects the entire request; masks expand only within effective grants. Results retain workspace, generation, collection, relative path and provider-specific source provenance. OpenAI status reports an unknown vector count as `null`. Cross-workspace ranking uses reciprocal per-workspace rank, not raw BM25 scores. Identical documents in different workspaces remain separate results.
+
+The existing `qgdoc:` document-reference and `qg_` token wire formats remain stable. Document references are untrusted locators, not bearer credentials. Every read re-authorizes them. Raw QMD short IDs, filesystem paths, fuzzy reads and arbitrary glob reads are not supported. Reindexing creates a fresh generation; old references become invalid and must be refreshed by querying again.
+
+## Persistence and indexing
+
+The state directory contains `gate.sqlite`, `indexes/{workspace}/{generation}/index.sqlite`, copied source snapshots, and `models/`. Preserve the **entire directory** across restarts or mount it as persistent storage in a future container. Back it up while the service is stopped. Docker Compose packaging and its persistence smoke test are described in [docs/containers.md](docs/containers.md). Cloud deployment is a separate operator action.
+
+QMD indexing and serving are mutually exclusive through `.process-lock`. Stop serving, index, then restart. A failed workspace build leaves its previous published generation intact. Multiple workspaces publish separately, not as one transaction. Old generations remain on disk; there is no automatic garbage collection. After a crash, inspect `.process-lock/owner.json` and confirm the owner is no longer running before manually removing the lock.
+
+QMD sources are trusted, operator-selected local directories. Only non-hidden Markdown/MDX files are ingested; symlinks are rejected, and `local-evidence`, dependencies and build directories are excluded. Keep sources stationary during indexing. Limits: 1 MiB per document, 256 MiB and 10,000 documents per collection. Git hooks and update commands are never executed. The QMD backend rebuilds a fresh index. The reusable GitHub workflow and incremental remote ingestion target the OpenAI backend.
+
+Requests are limited to 128 KiB and tool results to 64 KiB. At most 20 workspaces/results/documents and 200 lines per read are accepted. One expensive operation runs at a time, with 16 waiting slots and a 120-second deadline. Cancellation suppresses the response but cannot forcibly interrupt native inference; the slot stays occupied until native work finishes, including during shutdown.
+
+## Integration boundary and verification
+
+QMD 2.8.3's public store factory creates one model runtime per store. `src/qmd.ts` therefore uses a narrow, version-guarded private seam to inject one runtime into separate internal stores and the default tokenizer runtime. Store closure does not own model disposal. Upgrades require requalification. Shared object identity and synthetic vector/hybrid inference are tested; shared VRAM usage has **not** been measured. SQLite files separate retrieval state, not OS process privileges.
+
+```sh
+npm run check
+npm run build
+npm test
+npm run format:check
+npm audit
+# Optional: downloads roughly 2.1 GiB of model weights on first run.
+npm run test:models
+# Build and qualify the Docker Compose deployment locally.
+docker compose build
+npm run test:compose
+```
+
+The suite covers policy, credential persistence/revocation, cross-workspace reads, cancellation/queue limits, real QMD lexical indexing, official MCP client requests, CLI administration, atomic OpenAI manifest imports, active-ID filtering, parsed content and mixed backend routing. Native dependency installation varies by platform; review npm's package-specific install-script requests rather than globally disabling install-script protections.
+
+The [runtime architecture](docs/architecture.md) describes the native/QMD design. Hosted Access bootstrap and account-specific acceptance are documented in [the Worker deployment guide](docs/deployment.md).
+
+## Optional Cloudflare target
+
+The OpenAI-only Worker + SQLite Durable Object target uses Cloudflare Access Managed OAuth and an explicit identity-to-principal mapping. The Node/QMD target remains available. See [Cloudflare runtime](docs/cloudflare.md) for local workerd tests, operator bootstrap, bounds and the separate hosted acceptance gate.
+
+Remote ingestion authority for ephemeral producers is documented in the [ingestion protocol](docs/ingestion-state-protocol.md). It adds service-only publisher routes, durable fenced leases, bounded operation deltas and atomic gate publication. It requires a fresh administrator-provisioned authority; deployment and consumer workflow activation remain separate operator actions.

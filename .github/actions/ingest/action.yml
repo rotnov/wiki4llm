@@ -1,0 +1,20 @@
+name: Ingest committed documentation
+description: Run the reviewed local wiki-rag source against a remote ingestion authority
+inputs:
+  config:
+    description: TOML configuration path relative to the caller workspace
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      with:
+        python-version: "3.14"
+        enable-cache: false
+    - name: Converge the remote index
+      shell: bash
+      env:
+        CONFIG_PATH: ${{ github.workspace }}/${{ inputs.config }}
+      run: |
+        uv run --project "$GITHUB_ACTION_PATH/../../.." --frozen \
+          wiki-rag --config "$CONFIG_PATH" index --apply

@@ -1,0 +1,5 @@
+{
+  "key": "service:publisher-client-id.access",
+  "grants": { "allow": ["team-docs"], "deny": [] },
+  "enabled": true
+}

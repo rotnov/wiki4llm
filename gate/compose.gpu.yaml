@@ -1,0 +1,15 @@
+# Optional Linux NVIDIA override; validate the selected GPU and host toolkit first.
+services:
+  wiki-rag-gate:
+    environment:
+      QMD_LLAMA_GPU: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                [
+                  "${WIKI_RAG_GATE_GPU_ID:?Set WIKI_RAG_GATE_GPU_ID to a verified healthy GPU}",
+                ]
+              capabilities: [gpu]
