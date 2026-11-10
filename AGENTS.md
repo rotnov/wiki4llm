@@ -13,6 +13,10 @@ Retrieval with Cloudflare Workers, a SQLite Durable Object and Access Managed OA
   changes, run the checks relevant to the affected paths without duplicating tests.
 - Read `docs/development.md` for verification and `docs/deployment.md` for deployment.
   Gate-specific contracts remain under `gate/docs/`; do not duplicate protocol schemas.
+- For Wiki RAG deployment, access, OAuth clients, ingestion or recovery tasks, read
+  `.claude/skills/wiki-rag-ops/SKILL.md` and its task-specific references. This is
+  the canonical operator skill for both Claude and Codex. Codex agents load it
+  through this instruction; no duplicate skill or tracked symlink is required.
 - Publishing source does not authorize deploying a Worker, uploading project data or
   enabling a consumer workflow. Those actions require the user's task to include them.
 - Existing Worker names, namespaces, issuer/audience bindings and stored credentials

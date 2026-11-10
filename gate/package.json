@@ -22,7 +22,7 @@
     "admin:worker": "tsx scripts/cloudflare-admin.ts",
     "postinstall": "node scripts/repair-miniflare-types.ts",
     "repair:tooling": "node scripts/repair-miniflare-types.ts",
-    "check:docs": "prettier --check ../README.md ../AGENTS.md ../docs ../examples ../.github"
+    "check:docs": "prettier --check ../README.md ../AGENTS.md ../docs ../examples ../.github ../.claude/skills"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
