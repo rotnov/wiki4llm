@@ -4,7 +4,8 @@ description: >-
   Deploy and operate wiki4llm / Wiki RAG on Cloudflare Workers with Durable Objects
   and Access Managed OAuth. Use when setting up or upgrading the gate, managing
   reader or publisher permissions, connecting Claude or ChatGPT/Codex MCP clients,
-  configuring GitHub Actions ingestion, rotating credentials, or diagnosing access
+  installing reusable GitHub Actions in consumer repositories, configuring manual
+  and after-merge indexing with inputs and secrets, rotating credentials, or diagnosing access
   and indexing failures. Also use for WikiRack or WikiRag operations requests.
   This skill does not authorize deployments, permission changes, or data uploads
   beyond the user's requested scope.
@@ -45,11 +46,12 @@ results; never record secret values, OAuth codes, assertions or document bodies.
 
 ## Load only the relevant procedure
 
-| Task                                                           | Read next                                             |
-| -------------------------------------------------------------- | ----------------------------------------------------- |
-| First deployment, upgrade, separate-account front, rollback    | [Deployment and topology](references/deployment.md)   |
-| Reader/publisher grants, revocation, OAuth, client connections | [Access and clients](references/access.md)            |
-| Index/update, GHA, incidents, acceptance report                | [Ingestion and diagnostics](references/operations.md) |
+| Task                                                                   | Read next                                                 |
+| ---------------------------------------------------------------------- | --------------------------------------------------------- |
+| First deployment, upgrade, separate-account front, rollback            | [Deployment and topology](references/deployment.md)       |
+| Reader/publisher grants, revocation, OAuth, client connections         | [Access and clients](references/access.md)                |
+| Connect a repository to GitHub Actions; manual or after-merge indexing | [GitHub Actions onboarding](references/github-actions.md) |
+| Index/update, incidents, acceptance report                             | [Ingestion and diagnostics](references/operations.md)     |
 
 All repository paths below are relative to the checkout root. Follow the linked
 source documents rather than copying their schemas into new scripts:
