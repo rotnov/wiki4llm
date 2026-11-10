@@ -18,25 +18,25 @@ Other symbolic tool refs are rejected. No release tag is required.
 All nonsecret configuration can be supplied in the caller job's `with:` block;
 no TOML file or configuration checkout is needed in that mode.
 
-| Input | Default | Meaning |
-| --- | --- | --- |
-| `workspace` | Empty | Workspace slug; selects direct configuration with the next two inputs |
-| `project-id` | Empty | OpenAI project identifier |
-| `collections` | Empty | JSON array of collection objects |
-| `max-files` | 10000 | Maximum selected files, across all collections |
-| `max-file-bytes` | 2000000 | Maximum size of one selected file |
-| `max-total-bytes` | 50000000 | Maximum total selected bytes |
-| `chunk-size` | 800 | Chunk size in tokens |
-| `chunk-overlap` | 400 | Overlap in tokens, at most half the chunk size |
-| `gate-origin` | Required | Exact HTTPS origin without a path or trailing slash |
-| `mode` | `sync` | `sync` publishes incrementally; `plan` reads without provider writes |
-| `lease-wait-seconds` | 300 | Lease wait, integer from 0 to 1800 |
-| `environment` | `wiki-rag-publisher` | GitHub deployment environment |
-| `tool-repository` | `rotnov/wiki4llm` | Tool repository |
-| `tool-ref` | `main` | Follow upstream, or supply a full commit SHA |
-| `config` | Empty | Optional committed TOML path, instead of direct configuration |
-| `config-repository` | Caller | Optional separate repository for TOML configuration |
-| `config-ref` | Triggering SHA | Required when using another config repository |
+| Input                | Default              | Meaning                                                               |
+| -------------------- | -------------------- | --------------------------------------------------------------------- |
+| `workspace`          | Empty                | Workspace slug; selects direct configuration with the next two inputs |
+| `project-id`         | Empty                | OpenAI project identifier                                             |
+| `collections`        | Empty                | JSON array of collection objects                                      |
+| `max-files`          | 10000                | Maximum selected files, across all collections                        |
+| `max-file-bytes`     | 2000000              | Maximum size of one selected file                                     |
+| `max-total-bytes`    | 50000000             | Maximum total selected bytes                                          |
+| `chunk-size`         | 800                  | Chunk size in tokens                                                  |
+| `chunk-overlap`      | 400                  | Overlap in tokens, at most half the chunk size                        |
+| `gate-origin`        | Required             | Exact HTTPS origin without a path or trailing slash                   |
+| `mode`               | `sync`               | `sync` publishes incrementally; `plan` reads without provider writes  |
+| `lease-wait-seconds` | 300                  | Lease wait, integer from 0 to 1800                                    |
+| `environment`        | `wiki-rag-publisher` | GitHub deployment environment                                         |
+| `tool-repository`    | `rotnov/wiki4llm`    | Tool repository                                                       |
+| `tool-ref`           | `main`               | Follow upstream, or supply a full commit SHA                          |
+| `config`             | Empty                | Optional committed TOML path, instead of direct configuration         |
+| `config-repository`  | Caller               | Optional separate repository for TOML configuration                   |
+| `config-ref`         | Triggering SHA       | Required when using another config repository                         |
 
 Each collection has `name`, `repository`, `branch`, `vector_store_id`, `include`
 and `extensions`, plus optional `exclude`. Include/exclude values and extensions

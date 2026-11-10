@@ -19,7 +19,7 @@ flowchart LR
 | `wiki-rag`     | Operator machine or ephemeral Actions runner | None in remote mode                               |
 | `gate/` Worker | Your Cloudflare account                      | Grants, journal and active manifests in SQLite DO |
 | Retrieval      | Your OpenAI API project                      | Uploaded files and vector-store index             |
-| Source/config  | Your Git repositories                        | Committed documents and nonsecret configuration            |
+| Source/config  | Your Git repositories                        | Committed documents and nonsecret configuration   |
 
 State is saved by the CLI through the gate API. No bot commits state to Git, and
 GitHub cache/artifacts are not the state authority. No GPU or persistent VM is
