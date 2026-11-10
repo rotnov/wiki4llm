@@ -138,6 +138,12 @@ def load_config(path):
         raw = tomllib.loads(path.read_text())
     except (OSError, ValueError) as exc:
         raise RagError("cannot read valid TOML configuration") from exc
+    return config_from_mapping(raw, path)
+
+
+def config_from_mapping(raw, path):
+    """Validate either a TOML document or explicitly supplied workflow parameters."""
+    path = lexical_path(path)
     keys(
         raw,
         {

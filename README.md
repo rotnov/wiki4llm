@@ -18,8 +18,8 @@ POSIX host (macOS or Linux). The lockfile pins application and development
 dependencies. The CLI is an ephemeral process; the separately deployed gate lives
 in `gate/`. The repository does not include a hosted account or service subscription.
 
-For CI, the [shared GitHub Actions workflow](docs/github-actions.md) accepts a
-committed TOML and gate/OpenAI secrets from each caller. Its separate GitHub
+For CI, the [shared GitHub Actions workflow](docs/github-actions.md) accepts
+direct workflow parameters (or committed TOML) and gate/OpenAI secrets from each caller. Its separate GitHub
 checkout token is optional. Consumer installation and credential setup are explicit operator steps.
 
 ## Quick start
@@ -241,7 +241,7 @@ Licensed under [MIT](LICENSE).
 
 Use `[remote_state]` instead of `state` to keep the ingestion journal, lease and
 atomic gate publication in a provisioned Cloudflare authority. A fresh runner needs
-only full committed source checkouts, TOML and environment-backed credentials.
+only full committed source checkouts, validated configuration and environment-backed credentials.
 `index --apply` safely initializes or resumes/converges under the authoritative
 lease; `update --apply` remains strict on uninitialized state. Remote previews make
 read-only state requests. See [remote setup, recovery and source policy](docs/remote-state.md)

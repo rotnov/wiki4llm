@@ -5,8 +5,35 @@ on:
     inputs:
       config:
         type: string
-        default: wiki-rag.toml
-        description: Committed TOML path relative to the configuration repository
+        default: ""
+        description: Optional committed TOML path; omit when passing workspace parameters
+      workspace:
+        type: string
+        default: ""
+        description: Workspace slug; selects direct workflow configuration
+      project-id:
+        type: string
+        default: ""
+        description: OpenAI project identifier
+      collections:
+        type: string
+        default: ""
+        description: JSON array of collections (name, repository, branch, vector_store_id, include, exclude, extensions)
+      max-files:
+        type: number
+        default: 10000
+      max-file-bytes:
+        type: number
+        default: 2000000
+      max-total-bytes:
+        type: number
+        default: 50000000
+      chunk-size:
+        type: number
+        default: 800
+      chunk-overlap:
+        type: number
+        default: 400
       gate-origin:
         type: string
         required: true
@@ -30,8 +57,8 @@ on:
         default: rotnov/wiki4llm
       tool-ref:
         type: string
-        required: true
-        description: Full reviewed commit SHA; pin to the same revision as this workflow
+        default: main
+        description: Follow main by default, or supply a full commit SHA for a fixed version
       environment:
         type: string
         default: wiki-rag-publisher
@@ -65,7 +92,7 @@ jobs:
     timeout-minutes: 30
     environment: ${{ inputs.environment }}
     concurrency:
-      group: wiki-rag-${{ inputs.config-repository || github.repository }}-${{ inputs.config }}
+      group: wiki-rag-${{ inputs.config-repository || github.repository }}-${{ inputs.workspace || inputs.config || 'wiki-rag.toml' }}
       cancel-in-progress: false
     outputs:
       workspace: ${{ steps.ingest.outputs.workspace }}
@@ -75,18 +102,23 @@ jobs:
         env:
           TOOL_REF: ${{ inputs.tool-ref }}
           MODE: ${{ inputs.mode }}
-          CONFIG_PATH: ${{ inputs.config }}
+          CONFIG_PATH: ${{ inputs.config || 'wiki-rag.toml' }}
           CONFIG_REPOSITORY: ${{ inputs.config-repository }}
           CALLER_REPOSITORY: ${{ github.repository }}
           CONFIG_REF: ${{ inputs.config-ref }}
           LEASE_WAIT: ${{ inputs.lease-wait-seconds }}
+          WIKI_RAG_WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
         run: |
           python3 - <<'PY'
-          import os, pathlib, re
+          import json, os, pathlib, re
           def require(value, message):
               if not value:
                   raise SystemExit(message)
-          require(re.fullmatch(r"[0-9a-f]{40}", os.environ["TOOL_REF"]), "tool-ref must be a full commit SHA")
+          require(os.environ["TOOL_REF"] == "main" or re.fullmatch(r"[0-9a-f]{40}", os.environ["TOOL_REF"]), "tool-ref must be main or a full commit SHA")
+          inputs = json.loads(os.environ["WIKI_RAG_WORKFLOW_INPUTS"])
+          direct = any(inputs.get(k) for k in ("workspace", "project-id", "collections"))
+          require(not direct or all(inputs.get(k) for k in ("workspace", "project-id", "collections")), "workspace, project-id and collections are required together")
+          require(not direct or not any(inputs.get(k) for k in ("config", "config-repository", "config-ref")), "choose workflow parameters or committed config, not both")
           require(os.environ["MODE"] in {"plan", "sync"}, "mode must be plan or sync")
           path = pathlib.PurePosixPath(os.environ["CONFIG_PATH"])
           require(not path.is_absolute() and ".." not in path.parts and "\\" not in str(path), "config must stay inside its repository")
@@ -95,7 +127,7 @@ jobs:
           wait = os.environ["LEASE_WAIT"]
           require(wait.isdecimal() and 0 <= int(wait) <= 1800, "lease wait must be an integer from 0 to 1800")
           PY
-      - name: Checkout reviewed tool
+      - name: Checkout ingestion tool
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ inputs.tool-repository }}
@@ -105,7 +137,10 @@ jobs:
           submodules: false
           persist-credentials: false
           token: ${{ secrets.github-token || github.token }}
+      - name: Record resolved tool revision
+        run: git -C .wiki-rag-tool rev-parse HEAD
       - name: Checkout committed configuration
+        if: inputs.workspace == '' && inputs.project-id == '' && inputs.collections == ''
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ inputs.config-repository || github.repository }}
@@ -123,7 +158,9 @@ jobs:
       - name: Synchronize workspace
         id: ingest
         env:
-          CONFIG_PATH: .wiki-rag-config/${{ inputs.config }}
+          CONFIG_PATH: .wiki-rag-config/${{ inputs.config || 'wiki-rag.toml' }}
+          DIRECT_INPUTS: ${{ inputs.workspace != '' || inputs.project-id != '' || inputs.collections != '' }}
+          WIKI_RAG_WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
           MODE: ${{ inputs.mode }}
           LEASE_WAIT: ${{ inputs.lease-wait-seconds }}
           WIKI_RAG_GATE_ORIGIN: ${{ inputs.gate-origin }}
@@ -132,6 +169,11 @@ jobs:
           WIKI_RAG_INGEST_KEY: ${{ secrets.openai-key }}
           WIKI_RAG_CHECKOUT_TOKEN: ${{ secrets.github-token || github.token }}
         run: |
+          if [ "$DIRECT_INPUTS" = "true" ]; then
+            config_args=(--workflow-inputs)
+          else
+            config_args=(--config "$CONFIG_PATH")
+          fi
           uv run --project "$GITHUB_WORKSPACE/.wiki-rag-tool" --frozen \
-            python -m wiki_rag.github_actions --config "$CONFIG_PATH" \
+            python -m wiki_rag.github_actions "${config_args[@]}" \
             --mode "$MODE" --lease-wait-seconds "$LEASE_WAIT"

@@ -19,7 +19,7 @@ flowchart LR
 | `wiki-rag`     | Operator machine or ephemeral Actions runner | None in remote mode                               |
 | `gate/` Worker | Your Cloudflare account                      | Grants, journal and active manifests in SQLite DO |
 | Retrieval      | Your OpenAI API project                      | Uploaded files and vector-store index             |
-| Source/config  | Your Git repositories                        | Committed documents and nonsecret TOML            |
+| Source/config  | Your Git repositories                        | Committed documents and nonsecret configuration            |
 
 State is saved by the CLI through the gate API. No bot commits state to Git, and
 GitHub cache/artifacts are not the state authority. No GPU or persistent VM is
@@ -168,10 +168,13 @@ Keep nonsecret receipts and resource IDs outside the public tool repository.
 
 Install [the caller template](../examples/github-actions/call-ingest.yml) in the
 consumer repository's `.github/workflows/`. Pin both its workflow `uses` and
-`tool-ref` to the same reviewed commit of `rotnov/wiki4llm`.
+`tool-ref` to the same reviewed commit for reproducible runs, or follow `main`
+for both to automatically consume upstream updates. The latter trusts future tool
+changes with the supplied credentials.
 
 The [GHA guide](github-actions.md) owns the complete input/secret/output contract.
-Pass `config` and `gate-origin`; map `gate-client-id`, `gate-token` and `openai-key`
+Pass `workspace`, `project-id`, `collections` and `gate-origin` (or `config`
+and `gate-origin` for a committed TOML); map `gate-client-id`, `gate-token` and `openai-key`
 from GitHub Secrets. `github-token` is optional: the built-in token covers the
 caller repository and accessible public sources; other private repositories need
 a contents-read credential. Protect the selected publisher environment and limit
@@ -190,7 +193,8 @@ bindings stable during ordinary upgrades. Follow the gate recipe for explicit
 secret inheritance and immediate operator-configuration activation. Pausing
 publishers before deployment prevents an intentional reset from interrupting them.
 
-Update workflow/tool pins together, run plan, then perform the no-op/MCP checks.
+For pinned consumers, update workflow/tool pins together, run plan, then perform
+the no-op/MCP checks. Consumers following `main` pick up upstream updates automatically.
 Restoring older application code does not roll back journal or OpenAI state. Do
 not copy a stale local journal into the remote authority or delete its state to
 "fix" an indexing error. See [remote recovery](remote-state.md#failure-and-concurrency-behavior).

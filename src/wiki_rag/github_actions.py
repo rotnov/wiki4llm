@@ -1,4 +1,4 @@
-"""Reusable workflow runner: committed config, disposable sources, remote state only."""
+"""Reusable workflow runner: validated inputs, disposable sources, remote state only."""
 
 import argparse
 import base64
@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from .config import RagError, lexical_path, load_config
+from .config import RagError, config_from_mapping, keys, lexical_path, load_config
 from .output import summarize
 from .provider import OpenAIProvider
 from .remote_engine import run_remote
@@ -24,6 +24,7 @@ INPUT_ENV = {
     "WIKI_RAG_ACCESS_CLIENT_SECRET",
     "WIKI_RAG_INGEST_KEY",
     "WIKI_RAG_CHECKOUT_TOKEN",
+    "WIKI_RAG_WORKFLOW_INPUTS",
 }
 GIT_SETTINGS = {
     "core.hooksPath": "/dev/null",
@@ -148,10 +149,67 @@ def finish_clients(remote, provider, result, failed):
         raise RagError(prefix + "lease/client cleanup failed; rerun with fresh source") from None
 
 
+def workflow_config(inputs, workspace):
+    """Build remote configuration from workflow_call inputs using the shared validators."""
+    limits = {
+        "max-files": 10000,
+        "max-file-bytes": 2_000_000,
+        "max-total-bytes": 50_000_000,
+        "chunk-size": 800,
+        "chunk-overlap": 400,
+    }
+    keys(
+        inputs,
+        set(limits)
+        | {
+            "workspace",
+            "project-id",
+            "collections",
+            "config",
+            "config-repository",
+            "config-ref",
+            "tool-ref",
+            "tool-repository",
+            "gate-origin",
+            "mode",
+            "environment",
+            "lease-wait-seconds",
+        },
+        {"workspace", "project-id", "collections"},
+    )
+    if any(inputs.get(k) for k in ("config", "config-repository", "config-ref")):
+        raise RagError("choose workflow parameters or a committed config, not both")
+    try:
+        collections = json.loads(inputs["collections"])
+    except TypeError, ValueError:
+        raise RagError("collections must be a JSON array") from None
+    if not isinstance(collections, list):
+        raise RagError("collections must be a JSON array")
+    for collection in collections:
+        keys(
+            collection,
+            {"name", "repository", "vector_store_id", "branch", "include", "exclude", "extensions"},
+        )
+    raw = {
+        "version": 1,
+        "openai": {"project_id": inputs["project-id"], "api_key_env": "WIKI_RAG_INGEST_KEY"},
+        "remote_state": {
+            "workspace": inputs["workspace"],
+            "origin_env": "WIKI_RAG_GATE_ORIGIN",
+            "client_id_env": "WIKI_RAG_ACCESS_CLIENT_ID",
+            "client_secret_env": "WIKI_RAG_ACCESS_CLIENT_SECRET",
+        },
+        "collections": [dict(c, root=".") for c in collections],
+        **{key.replace("-", "_"): inputs.get(key, default) for key, default in limits.items()},
+    }
+    return config_from_mapping(raw, workspace / "workflow-inputs.toml")
+
+
 def execute(
     config_path,
     *,
     workspace,
+    workflow_inputs=None,
     mode="sync",
     lease_wait_seconds=300,
     engine=run_remote,
@@ -162,15 +220,23 @@ def execute(
         raise RagError("mode must be sync or plan")
     if type(lease_wait_seconds) is not int or not 0 <= lease_wait_seconds <= 1800:
         raise RagError("lease wait must be an integer from 0 to 1800")
-    relative = Path(config_path)
-    if relative.is_absolute() or ".." in relative.parts or "\\" in str(relative):
-        raise RagError("config must be a relative path inside the caller workspace")
     workspace = lexical_path(workspace)
-    path = lexical_path(workspace / relative)
-    if not path.is_relative_to(workspace) or not path.is_file():
-        raise RagError("config must be a regular file inside the caller workspace")
-    content = path.read_bytes()
-    cfg = load_config(path)
+    path = content = None
+    if workflow_inputs is not None:
+        if config_path is not None:
+            raise RagError("choose workflow parameters or a committed config, not both")
+        cfg = workflow_config(workflow_inputs, workspace)
+    else:
+        if config_path is None:
+            raise RagError("config path required")
+        relative = Path(config_path)
+        if relative.is_absolute() or ".." in relative.parts or "\\" in str(relative):
+            raise RagError("config must be a relative path inside the caller workspace")
+        path = lexical_path(workspace / relative)
+        if not path.is_relative_to(workspace) or not path.is_file():
+            raise RagError("config must be a regular file inside the caller workspace")
+        content = path.read_bytes()
+        cfg = load_config(path)
     if cfg.remote_state is None:
         raise RagError("reusable ingestion requires remote_state")
     for c in cfg.collections:
@@ -203,9 +269,10 @@ def execute(
         raise
     with git_environment():
         try:
-            committed_config(path, content)
-            if path.read_bytes() != content:
-                raise RagError("workflow config changed during preparation")
+            if path is not None:
+                committed_config(path, content)
+                if path.read_bytes() != content:
+                    raise RagError("workflow config changed during preparation")
             for c in cfg.collections:
                 git("check-ref-format", "--branch", c.branch)
             with tempfile.TemporaryDirectory(prefix="wiki-rag-sources-") as directory:
@@ -236,13 +303,24 @@ def execute(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="wiki-rag.toml")
+    config_args = parser.add_mutually_exclusive_group()
+    config_args.add_argument("--config")
+    config_args.add_argument("--workflow-inputs", action="store_true")
     parser.add_argument("--mode", default="sync", choices=("sync", "plan"))
     parser.add_argument("--lease-wait-seconds", type=int, default=300)
     args = parser.parse_args(argv)
     try:
+        inputs = None
+        if args.workflow_inputs:
+            try:
+                inputs = json.loads(os.environ.get("WIKI_RAG_WORKFLOW_INPUTS", ""))
+            except ValueError:
+                raise RagError("workflow inputs must be valid JSON") from None
+            if not isinstance(inputs, dict):
+                raise RagError("workflow inputs must be an object")
         result = execute(
-            args.config,
+            None if args.workflow_inputs else (args.config or "wiki-rag.toml"),
+            workflow_inputs=inputs,
             workspace=os.environ.get("GITHUB_WORKSPACE", os.getcwd()),
             mode=args.mode,
             lease_wait_seconds=args.lease_wait_seconds,

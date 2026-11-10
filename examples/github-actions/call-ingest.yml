@@ -1,6 +1,4 @@
-# Consumer installation template; replace the revision placeholders before use.
-# Replace BOTH REVIEWED_COMMIT_SHA occurrences with the same full 40-character SHA.
-# Replace main with the caller repository's default branch.
+# Consumer installation template; replace example identifiers and the source branch.
 name: Update project knowledge
 on:
   push:
@@ -10,11 +8,16 @@ permissions:
   contents: read
 jobs:
   rag:
-    uses: rotnov/wiki4llm/.github/workflows/ingest.yml@REVIEWED_COMMIT_SHA
+    uses: rotnov/wiki4llm/.github/workflows/ingest.yml@main
     with:
-      tool-ref: REVIEWED_COMMIT_SHA
-      config: wiki-rag.toml
+      workspace: team-docs
+      project-id: ${{ vars.WIKI_RAG_PROJECT_ID }}
       gate-origin: ${{ vars.WIKI_RAG_GATE_ORIGIN }}
+      max-files: 1000
+      collections: |
+        [{"name":"docs","repository":"example/project","branch":"main",
+          "vector_store_id":"vs_example","include":["docs/**/*.md"],
+          "exclude":[],"extensions":[".md"]}]
     secrets:
       gate-client-id: ${{ secrets.RAG_CLIENT_ID }}
       gate-token: ${{ secrets.RAG_TOKEN }}

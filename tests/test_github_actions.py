@@ -44,6 +44,31 @@ extensions = [".md"]
     return path
 
 
+def workflow_parameters(count=1):
+    return {
+        "workspace": "team-docs",
+        "project-id": "proj_example",
+        "collections": json.dumps(
+            [
+                {
+                    "name": f"docs{n}",
+                    "repository": f"example/source{n}",
+                    "branch": "main",
+                    "vector_store_id": f"vs_example{n}",
+                    "include": ["**/*.md"],
+                    "extensions": [".md"],
+                }
+                for n in range(count)
+            ]
+        ),
+        "max-files": 3,
+        "max-file-bytes": 500_000,
+        "max-total-bytes": 1_000_000,
+        "chunk-size": 800,
+        "chunk-overlap": 400,
+    }
+
+
 @pytest.fixture
 def credentials(monkeypatch):
     values = {
@@ -258,11 +283,19 @@ def test_second_checkout_failure_never_calls_engine_and_closes_clients(
     assert len(clones) == 2 and all(c.closed for c in clients)
 
 
-def test_plan_needs_no_openai_key_and_reuses_duplicate_source(repo, credentials, monkeypatch):
-    path = configuration(repo, 2)
-    path.write_text(path.read_text().replace("example/source1", "example/source0"))
-    git(repo, "add", ".")
-    git(repo, "commit", "-m", "Share source")
+@pytest.mark.parametrize("direct_inputs", [False, True])
+def test_plan_needs_no_openai_key_and_reuses_duplicate_source(
+    repo, credentials, monkeypatch, direct_inputs
+):
+    params = None
+    if direct_inputs:
+        params = workflow_parameters(2)
+        params["collections"] = params["collections"].replace("example/source1", "example/source0")
+    else:
+        path = configuration(repo, 2)
+        path.write_text(path.read_text().replace("example/source1", "example/source0"))
+        git(repo, "add", ".")
+        git(repo, "commit", "-m", "Share source")
     monkeypatch.delenv("WIKI_RAG_INGEST_KEY")
     monkeypatch.delenv("WIKI_RAG_CHECKOUT_TOKEN")
     original = subprocess.run
@@ -285,8 +318,9 @@ def test_plan_needs_no_openai_key_and_reuses_duplicate_source(repo, credentials,
 
     monkeypatch.setattr(subprocess, "run", invoke)
     result = gha().execute(
-        "wiki-rag.toml",
+        None if direct_inputs else "wiki-rag.toml",
         workspace=repo,
+        workflow_inputs=params,
         mode="plan",
         remote_factory=remote,
         provider_factory=lambda _: pytest.fail("provider in plan"),
@@ -367,8 +401,9 @@ def test_invalid_branch_never_runs_engine(repo, credentials, branch):
     assert all(c.closed for c in clients)
 
 
+@pytest.mark.parametrize("direct_inputs", [False, True])
 def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
-    repo, tmp_path, credentials, monkeypatch, capsys
+    repo, tmp_path, credentials, monkeypatch, capsys, direct_inputs
 ):
     import httpx
     from test_engine import FakeProvider
@@ -376,7 +411,10 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
 
     from wiki_rag.remote_state import RemoteState
 
-    configuration(repo)
+    if direct_inputs:
+        monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", json.dumps(workflow_parameters()))
+    else:
+        configuration(repo)
     source = source_repo(tmp_path)
     excluded = ".run/SYNTHETIC_EXCLUDED_CASE/run.xml"
     tracked(source, excluded, "synthetic non-document fixture\n")
@@ -430,7 +468,8 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     monkeypatch.setattr(module, "execute", prepared)
 
     def run(mode):
-        assert module.main(["--mode", mode]) == 0
+        argv = ["--mode", mode] + (["--workflow-inputs"] if direct_inputs else [])
+        assert module.main(argv) == 0
         text = capsys.readouterr().out
         assert "SYNTHETIC_EXCLUDED_CASE" not in text
         assert excluded not in text and "nested/readme.md" not in text
@@ -490,3 +529,88 @@ def test_local_authority_not_accepted(repo, credentials):
     path.write_text(text[:start] + 'state = ".state"\n' + text[end:])
     with pytest.raises(RagError, match="remote_state"):
         gha().execute("wiki-rag.toml", workspace=repo)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"workspace": "bad/workspace"},
+        {"project-id": "other"},
+        {"collections": "not-json"},
+        {"collections": "[]"},
+        {"collections": "{}"},
+        {"max-files": True},
+        {"max-file-bytes": -1},
+        {"max-total-bytes": 200_000_001},
+        {"chunk-overlap": 401},
+        {"config": "wiki-rag.toml"},
+        {"config-repository": "example/other"},
+    ],
+)
+def test_direct_inputs_reject_invalid_config_before_client_creation(repo, credentials, change):
+    params = workflow_parameters() | change
+    with pytest.raises(RagError):
+        gha().execute(
+            None,
+            workspace=repo,
+            workflow_inputs=params,
+            remote_factory=lambda _: pytest.fail("client before validation"),
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"repository": "https://elsewhere/source"},
+        {"branch": "--upload-pack=bad"},
+        {"branch": "bad name"},
+        {"include": ["../secret"]},
+        {"extensions": ["md"]},
+        {"root": "/tmp"},
+        {"vector_store_id": "invalid"},
+    ],
+)
+def test_direct_inputs_preserve_collection_validation(repo, credentials, change):
+    params = workflow_parameters()
+    collection = json.loads(params["collections"])[0] | change
+    params["collections"] = json.dumps([collection])
+    with pytest.raises(RagError):
+        gha().execute(None, workspace=repo, workflow_inputs=params)
+
+
+def test_direct_inputs_reject_ambiguous_file_config(repo, credentials):
+    configuration(repo)
+    with pytest.raises(RagError, match="config"):
+        gha().execute("wiki-rag.toml", workspace=repo, workflow_inputs=workflow_parameters())
+
+
+def test_workflow_inputs_main_rejects_invalid_json_without_traceback(monkeypatch, capsys):
+    monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", "{")
+    assert gha().main(["--workflow-inputs"]) == 2
+    assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "ref,accepted", [("main", True), ("a" * 40, True), ("v1", False), ("../main", False)]
+)
+def test_real_workflow_revision_validator_accepts_only_main_or_sha(ref, accepted):
+    import sys
+    import textwrap
+
+    workflow = Path(__file__).parents[1] / ".github/workflows/ingest.yml"
+    script = workflow.read_text().split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    env = dict(
+        os.environ,
+        TOOL_REF=ref,
+        MODE="plan",
+        CONFIG_PATH="wiki-rag.toml",
+        CONFIG_REPOSITORY="",
+        CALLER_REPOSITORY="example/source0",
+        CONFIG_REF="",
+        LEASE_WAIT="300",
+        WIKI_RAG_WORKFLOW_INPUTS=json.dumps(workflow_parameters()),
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)], env=env, capture_output=True, text=True
+    )
+    assert (result.returncode == 0) is accepted, result.stderr

@@ -6,37 +6,56 @@ source in that workspace, and runs the existing remote ingestion engine. No loca
 index-state artifact or state commit is required.
 
 Install [the caller template](../examples/github-actions/call-ingest.yml) in each
-trusted consumer repository. Use a reviewed commit published to `rotnov/wiki4llm`;
-no `v1` tag is required or assumed.
-Replace both `REVIEWED_COMMIT_SHA` occurrences with the same full commit SHA and
-adapt the trigger to the caller's default branch. Keep that pair together when
-upgrading: reusable workflows execute in the caller's repository context, so the
-tool checkout needs an explicit independent revision.
+trusted consumer repository. It follows `@main`, with the tool checkout also using
+`main` by default. This intentionally trusts future upstream changes with the
+caller's supplied credentials. Each run logs the resolved tool commit. The two
+branch resolutions can observe different commits if upstream changes mid-run; for
+reproducible execution, set both `uses:` and `tool-ref` to the same full commit SHA.
+Other symbolic tool refs are rejected. No release tag is required.
 
 ## Inputs
 
-| Input                | Default               | Meaning                                                               |
-| -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `config`             | `wiki-rag.toml`       | Committed TOML path inside the configuration repository               |
-| `gate-origin`        | Required              | Exact HTTPS gate origin, without a path or trailing slash             |
-| `tool-ref`           | Required              | Full 40-character reviewed tool commit; match workflow revision       |
-| `tool-repository`    | `rotnov/wiki4llm`     | Published tool repository, or an authorized fork                      |
-| `mode`               | `sync`                | `sync` converges the index; `plan` previews without provider requests |
-| `lease-wait-seconds` | `300`                 | Initial lease contention budget, integer 0–1800                       |
-| `config-repository`  | Caller repository     | Optional shared configuration repository                              |
-| `config-ref`         | Triggering commit SHA | Explicit ref required when config is in another repository            |
-| `environment`        | `wiki-rag-publisher`  | Caller repository environment for deployment protections              |
+All nonsecret configuration can be supplied in the caller job's `with:` block;
+no TOML file or configuration checkout is needed in that mode.
 
-Workspace, OpenAI project, collection/store identities, repository branches,
-include/exclude globs and extensions remain in the TOML. All source branches must
-be explicit. Each distinct repository/branch is cloned once with full history.
-The runner replaces collection roots in memory with disposable checkout paths;
-the TOML's `root` fields remain useful for local operation and are not CI paths.
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `workspace` | Empty | Workspace slug; selects direct configuration with the next two inputs |
+| `project-id` | Empty | OpenAI project identifier |
+| `collections` | Empty | JSON array of collection objects |
+| `max-files` | 10000 | Maximum selected files, across all collections |
+| `max-file-bytes` | 2000000 | Maximum size of one selected file |
+| `max-total-bytes` | 50000000 | Maximum total selected bytes |
+| `chunk-size` | 800 | Chunk size in tokens |
+| `chunk-overlap` | 400 | Overlap in tokens, at most half the chunk size |
+| `gate-origin` | Required | Exact HTTPS origin without a path or trailing slash |
+| `mode` | `sync` | `sync` publishes incrementally; `plan` reads without provider writes |
+| `lease-wait-seconds` | 300 | Lease wait, integer from 0 to 1800 |
+| `environment` | `wiki-rag-publisher` | GitHub deployment environment |
+| `tool-repository` | `rotnov/wiki4llm` | Tool repository |
+| `tool-ref` | `main` | Follow upstream, or supply a full commit SHA |
+| `config` | Empty | Optional committed TOML path, instead of direct configuration |
+| `config-repository` | Caller | Optional separate repository for TOML configuration |
+| `config-ref` | Triggering SHA | Required when using another config repository |
 
-For a shared workspace, keep one authoritative TOML in a trusted configuration
-repository. Each caller may pass `config-repository`, an explicit `config-ref`, and
-`config` to use it. The source revisions still come from the configured branches;
-the remote engine rejects stale or divergent source snapshots under its lease.
+Each collection has `name`, `repository`, `branch`, `vector_store_id`, `include`
+and `extensions`, plus optional `exclude`. Include/exclude values and extensions
+are arrays; repository names are `owner/repository` and branches are explicit.
+Do not supply `root`: the runner owns the disposable source directories. Shared
+TOML validators enforce the same identifiers, glob rules, limits and unique
+collection/store bindings. Credentials remain under `secrets:`, never in inputs.
+
+For existing TOML callers, set `config` instead. If neither direct inputs nor
+`config` are supplied, the historical `wiki-rag.toml` default is used. Direct
+inputs cannot be mixed with `config`, `config-repository` or `config-ref`.
+Limits/chunking inputs apply to direct configuration; TOML owns those values in
+file mode. Local CLI TOML support is unchanged.
+
+Each distinct repository/branch is cloned once with full history. All collections
+must be prepared before the engine publishes anything. The gate's remote authority
+still verifies the complete workspace/project/collection bindings; caller inputs
+do not grant access. The engine rejects stale or divergent snapshots under its
+lease. A caller updates the whole configured workspace, not just its own repository.
 
 ## Secrets passed by the caller
 
@@ -48,7 +67,7 @@ the remote engine rejects stale or divergent source snapshots under its lease.
 | `github-token`   | Optional                                | Checkout of tool, configuration and source repositories  |
 
 The gate token is the Access service-token secret, not an OpenAI key or a generic
-Bearer token. Its identity needs an enabled publisher grant for the TOML workspace.
+Bearer token. Its identity needs an enabled publisher grant for the configured workspace.
 No gate administrator credential is used by ingestion.
 
 When `github-token` is omitted or empty, the workflow uses the caller's built-in
@@ -76,8 +95,9 @@ It rejects other contexts before steps, uses Python 3.14/uv and a frozen depende
 set, and has a 30-minute timeout. Configure the selected environment's protections
 and scope its secrets to trusted publishing jobs before installation.
 
-The configuration must be a regular tracked file whose bytes match its checked-out
-HEAD. All collections must be cloned successfully before the engine starts; a
+In TOML mode, the configuration must be a regular tracked file whose bytes match
+its checked-out HEAD. In direct mode, the protected default-branch workflow supplies
+parameters through the input environment; no generated file bypass is used. All collections must be cloned successfully before the engine starts; a
 failed second checkout cannot publish a partial workspace. Source materialization
 disables hooks, templates, filters, ident expansion, EOL/encoding transformations
 and submodule traversal. The actual engine still verifies committed literal bytes
