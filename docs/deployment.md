@@ -182,8 +182,8 @@ the service identity to the intended workspace.
 
 Start with `mode: plan` on a trusted default-branch manual run. Confirm the Actions
 logs, source selection and gate authentication, then switch to `mode: sync` for
-approved pushes/manual runs. The reusable job rejects non-default-branch and PR
-contexts. Every invocation updates the whole configured workspace. The DO lease
+approved pushes/manual runs. Automatic ingestion rejects non-default-branch pushes and PR contexts. Manual
+branch dispatch requires the selected environment to permit that branch. Every invocation updates the whole configured workspace. The DO lease
 coordinates callers; GitHub concurrency alone does not span repositories.
 
 ## Upgrades and recovery

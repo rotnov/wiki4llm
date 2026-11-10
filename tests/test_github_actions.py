@@ -609,6 +609,46 @@ def test_real_workflow_revision_validator_accepts_only_main_or_sha(ref, accepted
         CONFIG_REF="",
         LEASE_WAIT="300",
         WIKI_RAG_WORKFLOW_INPUTS=json.dumps(workflow_parameters()),
+        EVENT_NAME="workflow_dispatch",
+        RUN_REF="refs/heads/main",
+        DEFAULT_BRANCH="main",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)], env=env, capture_output=True, text=True
+    )
+    assert (result.returncode == 0) is accepted, result.stderr
+
+
+@pytest.mark.parametrize(
+    "event,ref,accepted",
+    [
+        ("workflow_dispatch", "refs/heads/feature/test", True),
+        ("workflow_dispatch", "refs/heads/main", True),
+        ("push", "refs/heads/main", True),
+        ("push", "refs/heads/feature/test", False),
+        ("pull_request", "refs/pull/1/merge", False),
+        ("workflow_dispatch", "refs/tags/release", False),
+    ],
+)
+def test_manual_dispatch_and_automatic_branch_boundaries(event, ref, accepted):
+    import sys
+    import textwrap
+
+    workflow = Path(__file__).parents[1] / ".github/workflows/ingest.yml"
+    script = workflow.read_text().split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    env = dict(
+        os.environ,
+        TOOL_REF="main",
+        MODE="plan",
+        CONFIG_PATH="wiki-rag.toml",
+        CONFIG_REPOSITORY="",
+        CALLER_REPOSITORY="example/source0",
+        CONFIG_REF="",
+        LEASE_WAIT="300",
+        WIKI_RAG_WORKFLOW_INPUTS=json.dumps(workflow_parameters()),
+        EVENT_NAME=event,
+        RUN_REF=ref,
+        DEFAULT_BRANCH="main",
     )
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)], env=env, capture_output=True, text=True

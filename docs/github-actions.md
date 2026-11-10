@@ -90,13 +90,17 @@ Git configuration, command arguments, manifests or workflow outputs.
 
 ## Execution and outputs
 
-The job accepts only a `push` or `workflow_dispatch` from the caller's default branch.
-It rejects other contexts before steps, uses Python 3.14/uv and a frozen dependency
+The job accepts automatic pushes only from the caller's default branch. Manual
+`workflow_dispatch` may select a branch permitted by the configured GitHub
+environment; tags and PR events are rejected. Environment branch policies remain
+the operator-controlled publishing boundary. A manual run uses the chosen branch's
+workflow/config but still reads each collection's explicitly configured source
+branch. It rejects other contexts before steps, uses Python 3.14/uv and a frozen dependency
 set, and has a 30-minute timeout. Configure the selected environment's protections
 and scope its secrets to trusted publishing jobs before installation.
 
 In TOML mode, the configuration must be a regular tracked file whose bytes match
-its checked-out HEAD. In direct mode, the protected default-branch workflow supplies
+its checked-out HEAD. In direct mode, the environment-authorized workflow supplies
 parameters through the input environment; no generated file bypass is used. All collections must be cloned successfully before the engine starts; a
 failed second checkout cannot publish a partial workspace. Source materialization
 disables hooks, templates, filters, ident expansion, EOL/encoding transformations

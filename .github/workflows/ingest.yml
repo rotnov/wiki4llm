@@ -86,8 +86,9 @@ permissions:
 jobs:
   ingest:
     if: >-
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/')) ||
+      (github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ inputs.environment }}
@@ -100,6 +101,9 @@ jobs:
     steps:
       - name: Validate workflow inputs
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           TOOL_REF: ${{ inputs.tool-ref }}
           MODE: ${{ inputs.mode }}
           CONFIG_PATH: ${{ inputs.config || 'wiki-rag.toml' }}
@@ -115,6 +119,10 @@ jobs:
               if not value:
                   raise SystemExit(message)
           require(os.environ["TOOL_REF"] == "main" or re.fullmatch(r"[0-9a-f]{40}", os.environ["TOOL_REF"]), "tool-ref must be main or a full commit SHA")
+          event, ref = os.environ["EVENT_NAME"], os.environ["RUN_REF"]
+          require((event == "workflow_dispatch" and ref.startswith("refs/heads/")) or
+                  (event == "push" and ref == "refs/heads/" + os.environ["DEFAULT_BRANCH"]),
+                  "only manual branch dispatch or default-branch pushes may ingest")
           inputs = json.loads(os.environ["WIKI_RAG_WORKFLOW_INPUTS"])
           direct = any(inputs.get(k) for k in ("workspace", "project-id", "collections"))
           require(not direct or all(inputs.get(k) for k in ("workspace", "project-id", "collections")), "workspace, project-id and collections are required together")
