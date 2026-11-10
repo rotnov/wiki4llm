@@ -266,3 +266,43 @@ publication. Retired ownership is retained, with a 100,000-record maintenance
 limit. It does not guarantee exactly-once OpenAI calls or activate a GitHub Actions
 workflow. Publisher grants are separate from reader mappings and admin privilege;
 human MCP OAuth remains read-only.
+
+## Separate-account reader entrypoint
+
+An optional Access-protected front Worker (`src/cloudflare/front.ts`) provides a
+new MCP login domain without moving the backend Durable Object or ingestion
+journal. Deploy it on the new account's own Workers hostname. Its `PUBLIC_ORIGIN`
+is that HTTPS origin; `BACKEND_ORIGIN` is the existing protected backend origin.
+`BRIDGE_CLIENT_ID` and `BRIDGE_CLIENT_SECRET` are Worker secrets for a dedicated
+backend-account Access service token. This transport identity must have no gate
+principal, publisher grant or administrative privilege.
+
+On the backend, optional `MCP_FORWARDER` is a JSON deployment binding containing
+`identity` (the exact typed transport service identity), `issuer` (the new Access
+team issuer) and `audience` (the new MCP application's audience). These are
+nonsecret identifiers. The backend independently validates both the original
+transport assertion and the separately forwarded signed user assertion. The
+user must be human, both assertions must remain valid, and only `/mcp` and
+read-only `/identity` are accepted. A transport credential alone cannot access
+either surface. Existing direct authentication and publisher endpoints remain
+unchanged; forwarded requests cannot administer or ingest.
+
+Map the verified new identity explicitly with `/admin/identity`, adding its
+`issuer` to the usual `key`, `principal` and `enabled` fields. Never infer the new
+subject from an email header or assume subjects match across accounts. Identity
+lookups use issuer plus key; equal subjects from different accounts remain
+distinct. The optional issuer must be the primary or configured reader issuer.
+`/admin/unbind` accepts the same optional issuer. Identity inventory defaults to
+the primary issuer; select the reader realm with
+`status --kind identities --issuer https://reader.cloudflareaccess.com`.
+Pagination remains scoped to that issuer. Principal grants, manifests, store
+reservations and ingestion ownership are shared unchanged; the persisted primary
+issuer/audience guard is not migrated or relaxed.
+
+The front forwards only `/mcp` POST and `/identity` GET, to the fixed backend,
+without following redirects. It strips client credentials/cookies, injects the
+transport credentials, and forwards the signed edge assertion in
+`X-Wiki-Rag-Reader-Assertion`. Backend cookies and credential headers never reach
+the client. Protect the front hostname with a Managed OAuth Access application
+and configure its identity policy independently. The two public MCP endpoints
+can coexist while clients move; GHA publishers retain the backend origin.

@@ -26,8 +26,10 @@ const statusOptions = z
       .regex(/^[^\x00-\x1f\x7f]*$/)
       .optional(),
     limit: z.number().int().min(1).max(20).optional(),
+    issuer: z.string().url().max(256).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.issuer === undefined || value.kind === "identities");
 export type StatusOptions = z.infer<typeof statusOptions>;
 const inventory = z
   .object({
@@ -181,7 +183,7 @@ export function parseAdminArguments(args: string[]): {
         value = rest[i + 1];
       if (
         !flag ||
-        !["--kind", "--after", "--limit"].includes(flag) ||
+        !["--kind", "--after", "--limit", "--issuer"].includes(flag) ||
         value === undefined ||
         value.startsWith("--")
       )
@@ -214,7 +216,7 @@ if (
     process.stdout.write(JSON.stringify(result) + "\n");
   } catch {
     process.stderr.write(
-      "Administrative request failed. Usage: cloudflare-admin https://host identity|status|principal|publisher|ingestion|bind|unbind|import [input.json]; status supports --kind workspaces|principals|identities --after cursor --limit 1..20\n",
+      "Administrative request failed. Usage: cloudflare-admin https://host identity|status|principal|publisher|ingestion|bind|unbind|import [input.json]; status supports --kind workspaces|principals|identities --after cursor --limit 1..20; identities also accepts --issuer URL\n",
     );
     process.exitCode = 1;
   }

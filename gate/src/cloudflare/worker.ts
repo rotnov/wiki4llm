@@ -18,6 +18,7 @@ export interface Env {
   ACCESS_AUDIENCE: string;
   PUBLIC_ORIGIN: string;
   ADMIN_IDENTITIES: string;
+  MCP_FORWARDER?: string;
   GATE: Binding;
   [key: string]: unknown;
 }
@@ -126,9 +127,24 @@ const mapping = z
     key: z.string().refine(validIdentityKey),
     principal: z.string(),
     enabled: z.boolean(),
+    issuer: z.string().optional(),
   })
   .strict();
-const unbind = z.object({ key: z.string().refine(validIdentityKey) }).strict();
+const unbind = z
+  .object({
+    key: z.string().refine(validIdentityKey),
+    issuer: z.string().optional(),
+  })
+  .strict();
+const forwarderSchema = z
+  .object({
+    identity: z
+      .string()
+      .refine((key) => key.startsWith("service:") && validIdentityKey(key)),
+    issuer: z.string(),
+    audience: z.string(),
+  })
+  .strict();
 const imported = z
   .object({
     id: z.string(),
@@ -182,6 +198,8 @@ async function readJSON(
 export class GateDurableObject {
   private readonly state: CloudState;
   private readonly verifier: AccessVerifier;
+  private readonly readerVerifier?: AccessVerifier;
+  private readonly forwarderIdentity?: string;
   private readonly ingestion: IngestionState;
   private readonly queue = new BoundedQueue(16, 120000);
   private importing = false;
@@ -190,13 +208,49 @@ export class GateDurableObject {
     ctx: DurableObjectState,
     private readonly env: Env,
   ) {
+    this.verifier = new AccessVerifier(env.ACCESS_ISSUER, env.ACCESS_AUDIENCE);
+    const forwarder =
+      env.MCP_FORWARDER === undefined
+        ? undefined
+        : forwarderSchema.parse(JSON.parse(env.MCP_FORWARDER));
+    if (forwarder) {
+      if (forwarder.issuer === env.ACCESS_ISSUER)
+        throw new GateError("INVALID_INPUT");
+      this.readerVerifier = new AccessVerifier(
+        forwarder.issuer,
+        forwarder.audience,
+      );
+      this.forwarderIdentity = forwarder.identity;
+    }
     this.state = new CloudState(
       ctx.storage,
       env.ACCESS_ISSUER,
       env.ACCESS_AUDIENCE,
+      forwarder?.issuer,
     );
     this.ingestion = new IngestionState(ctx.storage, this.state);
-    this.verifier = new AccessVerifier(env.ACCESS_ISSUER, env.ACCESS_AUDIENCE);
+  }
+  private async requestIdentity(request: Request) {
+    const transport = await this.verifier.verify(
+      request.headers.get("cf-access-jwt-assertion") ?? "",
+    );
+    const assertion = request.headers.get("x-wiki-rag-reader-assertion");
+    if (transport.key !== this.forwarderIdentity) {
+      if (assertion !== null) throw new GateError("UNAUTHENTICATED");
+      return transport;
+    }
+    if (
+      !assertion ||
+      !this.readerVerifier ||
+      !["/mcp", "/identity"].includes(new URL(request.url).pathname)
+    )
+      throw new GateError("UNAUTHENTICATED");
+    const reader = await this.readerVerifier.verify(assertion);
+    if (!reader.key.startsWith("user:")) throw new GateError("UNAUTHENTICATED");
+    return {
+      ...reader,
+      expiresAt: Math.min(transport.expiresAt, reader.expiresAt),
+    };
   }
   private admin(identity: Identity) {
     let keys: unknown;
@@ -300,9 +354,7 @@ export class GateDurableObject {
     if (path instanceof Response) return path;
     let identity: Identity;
     try {
-      identity = await this.verifier.verify(
-        request.headers.get("cf-access-jwt-assertion") ?? "",
-      );
+      identity = await this.requestIdentity(request);
     } catch {
       return response(401);
     }
@@ -405,15 +457,17 @@ export class GateDurableObject {
         const url = new URL(request.url);
         if (
           [...url.searchParams.keys()].some(
-            (k) => !["kind", "after", "limit"].includes(k),
+            (k) => !["kind", "after", "limit", "issuer"].includes(k),
           )
         )
           return response(400);
         const kind = url.searchParams.get("kind") ?? "workspaces",
+          issuer = url.searchParams.get("issuer") ?? undefined,
           after = url.searchParams.get("after") ?? "",
           limit = Number(url.searchParams.get("limit") ?? 20);
         if (
           !["workspaces", "principals", "identities"].includes(kind) ||
+          (issuer !== undefined && kind !== "identities") ||
           after.length > 300 ||
           !Number.isInteger(limit) ||
           limit < 1 ||
@@ -425,6 +479,7 @@ export class GateDurableObject {
             kind as "workspaces" | "principals" | "identities",
             after,
             limit,
+            issuer,
           ),
           { headers: { "Cache-Control": "no-store" } },
         );
@@ -459,12 +514,12 @@ export class GateDurableObject {
           }
           case "/admin/identity": {
             const a = mapping.parse(value);
-            this.state.bind(a.key, a.principal, a.enabled);
+            this.state.bind(a.key, a.principal, a.enabled, a.issuer);
             break;
           }
           case "/admin/unbind": {
             const a = unbind.parse(value);
-            this.state.unbind(a.key);
+            this.state.unbind(a.key, a.issuer);
             break;
           }
           case "/admin/import": {

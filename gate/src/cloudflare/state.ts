@@ -27,6 +27,7 @@ export class CloudState {
     private readonly storage: DurableObjectStorage,
     readonly issuer: string,
     readonly audience: string,
+    private readonly readerIssuer?: string,
   ) {
     storage.sql
       .exec(`CREATE TABLE IF NOT EXISTS authority(id INTEGER PRIMARY KEY,issuer TEXT NOT NULL,audience TEXT NOT NULL);
@@ -68,15 +69,23 @@ export class CloudState {
       this.bump();
     });
   }
-  bind(key: string, principal: string, enabled: boolean) {
+  private acceptsIssuer(issuer: string): boolean {
+    return issuer === this.issuer || issuer === this.readerIssuer;
+  }
+  bind(key: string, principal: string, enabled: boolean, issuer = this.issuer) {
     if (!validIdentityKey(key)) invalid();
+    if (
+      !this.acceptsIssuer(issuer) ||
+      (issuer !== this.issuer && !key.startsWith("user:"))
+    )
+      invalid();
     validateSlug(principal);
     if (!this.rows("SELECT id FROM principals WHERE id=?", principal).length)
       invalid();
     this.storage.transactionSync(() => {
       this.storage.sql.exec(
         "INSERT INTO identities VALUES(?,?,?,?) ON CONFLICT(issuer,key) DO UPDATE SET principal=excluded.principal,enabled=excluded.enabled",
-        this.issuer,
+        issuer,
         key,
         principal,
         +enabled,
@@ -84,12 +93,13 @@ export class CloudState {
       this.bump();
     });
   }
-  unbind(key: string) {
+  unbind(key: string, issuer = this.issuer) {
     if (!validIdentityKey(key)) invalid();
+    if (!this.acceptsIssuer(issuer)) invalid();
     this.storage.transactionSync(() => {
       this.storage.sql.exec(
         "DELETE FROM identities WHERE issuer=? AND key=?",
-        this.issuer,
+        issuer,
         key,
       );
       this.bump();
@@ -107,11 +117,14 @@ export class CloudState {
   }
   context(identity: Identity): Context {
     this.checkAuthority();
-    if (identity.issuer !== this.issuer || identity.expiresAt <= Date.now())
+    if (
+      !this.acceptsIssuer(identity.issuer) ||
+      identity.expiresAt <= Date.now()
+    )
       throw new GateError("UNAUTHENTICATED");
     const r = this.rows(
       "SELECT p.id,p.grants_json FROM identities i JOIN principals p ON p.id=i.principal WHERE i.issuer=? AND i.key=? AND i.enabled=1 AND p.enabled=1",
-      this.issuer,
+      identity.issuer,
       identity.key,
     )[0];
     if (!r) throw new GateError("UNAUTHENTICATED");
@@ -281,16 +294,23 @@ export class CloudState {
     kind: "workspaces" | "principals" | "identities",
     after: string,
     limit: number,
+    issuer = this.issuer,
   ) {
+    if (!this.acceptsIssuer(issuer)) invalid();
     const queries = {
       workspaces:
         "SELECT id,generation,parts,bytes FROM workspaces WHERE id>? ORDER BY id LIMIT ?",
       principals:
         "SELECT id,enabled,grants_json FROM principals WHERE id>? ORDER BY id LIMIT ?",
       identities:
-        "SELECT key AS id,principal,enabled FROM identities WHERE key>? ORDER BY key LIMIT ?",
+        "SELECT key AS id,principal,enabled FROM identities WHERE issuer=? AND key>? ORDER BY key LIMIT ?",
     };
-    const rows = this.rows(queries[kind], after, limit + 1);
+    const rows = this.rows(
+      queries[kind],
+      ...(kind === "identities"
+        ? [issuer, after, limit + 1]
+        : [after, limit + 1]),
+    );
     const items: typeof rows = [];
     let size = 1024;
     for (const row of rows.slice(0, limit)) {

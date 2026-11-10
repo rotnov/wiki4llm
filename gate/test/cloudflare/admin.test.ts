@@ -133,6 +133,25 @@ test("operator CLI validates explicit status flags and rejects accidental writes
       "status",
       "--kind",
       "identities",
+      "--issuer",
+      "https://reader.cloudflareaccess.com",
+    ]).status,
+    { kind: "identities", issuer: "https://reader.cloudflareaccess.com" },
+  );
+  assert.throws(() =>
+    parse([
+      "https://gate.example",
+      "status",
+      "--issuer",
+      "https://reader.cloudflareaccess.com",
+    ]),
+  );
+  assert.deepEqual(
+    parse([
+      "https://gate.example",
+      "status",
+      "--kind",
+      "identities",
       "--after",
       "service:client.access",
       "--limit",
