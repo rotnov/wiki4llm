@@ -41,6 +41,13 @@ receive corpus content. A principal with read-all grants still cannot administer
 
 ## Publisher and administrator permissions
 
+Keep HTTP authentication isolated between operator and publisher roles. A shared
+HTTP client can retain Access cookies; use separate clients or remove cookies
+from each service-auth request so only that role's own credential pair is sent.
+After creating Access policies or activating Worker settings, bounded read-only
+identity probes may wait for propagation. Do not blindly replay administrative
+writes, rotate credentials on an unexplained failure, or log authentication values.
+
 Publishers require both an Access Service Auth policy and an enabled gate publisher
 grant. Use the publisher's own credentials with `identity` to discover its typed
 key, then switch back to the temporary operator credentials for provisioning:

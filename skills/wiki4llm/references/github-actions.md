@@ -111,10 +111,12 @@ If GitHub has not registered a new workflow for dispatch, inspect its visibility
 and registration before retrying; do not silently merge or create another repository.
 
 After a successful plan and explicit authorization to publish, dispatch `mode=sync`
-against the same reviewed configuration. Record the submitted job ID; workflow
-success means durable submission, not completed indexing. Check publisher
-`status --summary` for background completion and its publication ID; no CI job
-should wait or poll OpenAI. Repeat sync after completion on
+against the same reviewed configuration. Record the submitted job ID. The shared
+workflow polls gate status for that exact job for up to five minutes; successful
+completion confirms publication. An indexing error or timeout makes the workflow
+fail. Timeout does not cancel the background job: inspect publisher
+`status --summary` or MCP `status` before retrying. Direct CLI submission remains
+asynchronous, and neither workflow stage polls OpenAI. Repeat sync after completion on
 the same source commits, selected bytes and processing configuration: expect zero
 additions/replacements/deletions and unchanged publication identity. Verify actual
 source revisions in both runs. A new commit outside the selected files can advance

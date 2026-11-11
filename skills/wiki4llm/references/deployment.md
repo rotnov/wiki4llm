@@ -107,6 +107,13 @@ same-origin browser POST; see [invitations](invitations.md) for deployment prere
 
 ## Upgrades and rollback
 
+For a binding-only change, preserve the deployed code and unrelated bindings.
+Cloudflare's `inherit` binding defaults to the latest uploaded version, which may
+not be active. Before each settings write, verify that latest uploaded and active
+versions match the expected version; repeat the check before restoring temporary
+administration. A matching secret name alone does not prove its value was preserved.
+Keep each attempt's receipt and reconcile uncertain outcomes before a new attempt.
+
 Run the checks appropriate to changed code in `docs/development.md` before rollout.
 Capture the current version and nonsecret binding inventory. Deploy the reviewed
 source with existing namespace/migrations and explicit inherited secrets; read
