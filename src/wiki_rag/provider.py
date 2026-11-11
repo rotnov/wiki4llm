@@ -346,6 +346,13 @@ class OpenAIProvider:
         current = inspect()
         if current["attributes"] == attributes:
             return current
+        print(
+            "wiki-rag: "
+            + json.dumps(
+                {"event": "metadata_recovery_candidate", "attachment_status": current["status"]}
+            ),
+            file=sys.stderr,
+        )
         self.request(
             "POST",
             f"vector_stores/{store}/files/{fid}",
