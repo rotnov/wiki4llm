@@ -9,7 +9,7 @@
     />
     <meta name="theme-color" content="#071425" />
     <title>wiki4llm — Project knowledge for your agents</title>
-    <link rel="stylesheet" href="styles.css?v=413f1ecafd0b" />
+    <link rel="stylesheet" href="styles.css?v=acc8e6e94ffb" />
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
@@ -36,6 +36,23 @@
           searchable context for coding agents. Keep the source in Git. Give
           agents the knowledge they are allowed to use.
         </p>
+        <div class="skill-install" aria-labelledby="install-title">
+          <h2 id="install-title">Install the agent skill</h2>
+          <div class="install-command-row">
+            <code id="install-command"
+              >npx skills add rotnov/wiki4llm@wiki4llm</code
+            >
+            <button class="install-copy" id="copy-install" type="button" hidden>
+              Copy command
+            </button>
+          </div>
+          <p
+            class="install-feedback"
+            id="install-feedback"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </div>
         <a class="button" href="#how"
           >Follow the flow <span aria-hidden="true">↗</span></a
         >
@@ -259,5 +276,6 @@
         <a href="https://github.com/rotnov/wiki4llm">GitHub</a></span
       >
     </footer>
+    <script src="install.js?v=db3520ed2a50" defer></script>
   </body>
 </html>
