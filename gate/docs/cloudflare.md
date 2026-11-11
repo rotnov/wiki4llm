@@ -68,7 +68,10 @@ Deployment requires separate authorization and operator configuration:
 4. Begin with `ADMIN_IDENTITIES` equal to `[]`. An authenticated operator calls
    `/identity` to read only their own `{issuer,key}`, then an authorized deployment
    operator adds that exact typed key to the configuration allowlist.
-5. Bootstrap principals/mappings and import reviewed producer manifests.
+5. Bootstrap reader principals/mappings. For CLI/GHA-managed ingestion, provision
+   ownership and publisher grants as described in [deployment](deployment.md),
+   then let the CLI publish. Manual manifest import is a separate mode for
+   workspaces that are not ingestion-managed; do not combine these modes.
 6. With a real MCP client, verify Access discovery, authorization, token exchange,
    refresh, logout/expiry, unauthenticated challenges and the five MCP tools.
    Test a restricted identity and an independently mapped service identity.
@@ -146,6 +149,10 @@ Inventory responses are also capped at 64 KiB; a page may contain fewer than
 Status `kind` is `workspaces`, `principals` or `identities`; the default is
 `workspaces`. `limit` is 1–20. Pass returned `next` as `after` to continue.
 Workspace inventory returns metadata and chunk sizes, never snapshot bodies.
+Publisher grants and ingestion journals are not available through this inventory.
+Publisher updates replace the entire grant set. Preserve the latest provisioning
+input and successful write receipt in protected operator records; a publisher
+preview tests one workspace's authorization and cannot reconstruct all its grants.
 
 For a hosted Access-protected origin, the operator client uses
 `GATE_ACCESS_CLIENT_ID` and `GATE_ACCESS_CLIENT_SECRET` from its process
@@ -306,3 +313,35 @@ transport credentials, and forwards the signed edge assertion in
 the client. Protect the front hostname with a Managed OAuth Access application
 and configure its identity policy independently. The two public MCP endpoints
 can coexist while clients move; GHA publishers retain the backend origin.
+
+### Transport credential rotation
+
+The backend accepts exactly one `MCP_FORWARDER.identity`; the front and backend
+cannot be switched atomically. The current implementation does not provide
+zero-downtime transport rotation. Agree on a brief reader interruption and perform
+immediate backend activation outside active ingestion attempts.
+
+1. Record current backend/front versions and nonsecret bindings. Retain the old
+   secret in the approved secret manager while it remains trusted; never export it
+   into the inventory. Create the replacement service token and a dedicated Service
+   Auth policy without removing the old policy. Give neither token any gate grant.
+2. Call the backend `/identity` with the new token to verify its exact typed key.
+   Prepare the front's replacement secrets and backend forwarder configuration.
+   Installing Worker secrets can create/activate versions, so perform the actual
+   front secret writes during the maintenance window, not as a harmless preflight.
+3. Switch backend `MCP_FORWARDER.identity` to the new key; deploy and immediately
+   activate the exact version. Preserve reader issuer/audience, the primary
+   authority binding and all query-secret names. The old front may now fail closed.
+4. Install the matching new `BRIDGE_CLIENT_ID` and `BRIDGE_CLIENT_SECRET` on the
+   front, deploy/activate the intended version with both required secret bindings,
+   and read back both Workers' active versions and nonsecret settings.
+5. Verify human OAuth through the front with `/identity` and real MCP query/get,
+   plus the intended denied-access case. Confirm the backend publisher still works.
+   Only after acceptance, revoke the old transport token and its dedicated policy.
+6. If the switch fails, restore the matching old front/backend configuration only
+   while the old credential remains trusted and valid. Do not restore revoked or
+   compromised credentials; keep access closed and repair the new configuration.
+
+Preserve unrelated policies and the permanent publisher throughout. A requirement
+for uninterrupted readers needs a separately designed overlap mechanism rather
+than claiming this sequence is seamless.

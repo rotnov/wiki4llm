@@ -147,8 +147,10 @@ uv run wiki-rag --config "$RAG_CONFIG" index --apply
 uv run wiki-rag --config "$RAG_CONFIG" status
 ```
 
-The first run initializes the empty authority and publishes. The unchanged second
-run must preserve publication/file identity and create no replacement operations.
+The first run initializes the empty authority and publishes. The second run, using
+the same source commits, selected bytes and processing configuration, must preserve
+publication/file identity and create no replacement operations. A new repository
+commit can change publication metadata even if all selected file IDs are reused.
 `index --apply` is safe for initial and subsequent convergence; `update --apply`
 requires an already initialized authority.
 
@@ -171,6 +173,11 @@ consumer repository's `.github/workflows/`. Pin both its workflow `uses` and
 `tool-ref` to the same reviewed commit for reproducible runs, or follow `main`
 for both to automatically consume upstream updates. The latter trusts future tool
 changes with the supplied credentials.
+
+The template is manual-only, with `mode` defaulting to `plan`; it does not enable
+automatic indexing when copied. After manual acceptance and authorization, add a
+push trigger for the actual default branch. Its existing mode expression then
+selects `sync` for pushes while preserving manual plan/sync selection.
 
 The [GHA guide](github-actions.md) owns the complete input/secret/output contract.
 Pass `workspace`, `project-id`, `collections` and `gate-origin` (or `config`

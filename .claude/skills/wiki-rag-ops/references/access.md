@@ -54,14 +54,29 @@ The ingestion request fixes the complete workspace ownership. Publisher masks
 authorize writes to that workspace; they do not grant reader or admin access.
 Never send the temporary operator pair or Cloudflare management token to GHA.
 
+Publisher writes replace the entire grant set; they do not append permissions.
+There is no publisher inventory/readback endpoint in the current admin API.
+Before modifying an existing publisher, obtain its complete current provisioning
+JSON from protected records, preserve intended grants, then save the new JSON and
+write receipt. Verify allowed and denied workspace access with publisher previews.
+These checks are behavioral evidence, not an export of all grants. If the prior
+configuration is unavailable, do not guess: obtain it or an explicit decision to
+replace the complete grant set.
+
 For revocation, choose the intended scope: disable a reader mapping, disable its
 principal (affects every mapped identity), unbind an exact issuer/key, or disable
 a publisher grant. Inspect the affected identities before changing a shared
 principal. Revoke the relevant Access credential/session as well when requested;
 gate grant removal does not itself erase the client's OAuth credential.
-Verify denial after readback. Transport token rotation requires updating front
-secrets and the backend's exact forwarder identity together before retiring the old
-token; never add the transport identity to a reader principal as a shortcut.
+Read back reader changes where inventory is supported and verify denial with the
+affected credential. For publisher changes, retain the write receipt and perform
+the behavioral checks above; do not claim a publisher configuration readback.
+
+Transport rotation is not atomic: the backend accepts one forwarder identity and
+the two Workers deploy independently. Use the maintenance-window sequence in
+`gate/docs/cloudflare.md` under "Transport credential rotation". Establish the
+allowed interruption before switching; do not promise zero downtime or add the
+transport identity to a reader principal as a shortcut.
 
 ## Managed OAuth settings
 

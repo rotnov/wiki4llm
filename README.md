@@ -144,8 +144,10 @@ collections under existing state is deliberately outside this MVP.
 New and changed files are uploaded once, attached, and polled until `completed`.
 All configured collections publish together only after every selected file
 succeeds and a second source scan matches the captured selection. The previous
-manifest survives prepublication failure. Unchanged updates upload nothing and
-retain the publication identity. Source revisions must descend from the last
+manifest survives prepublication failure. Updates at identical source revisions,
+selected bytes and processing configuration upload nothing and retain the publication
+identity. A new repository commit may advance publication metadata while reusing
+unchanged file IDs. Source revisions must descend from the last
 published repository commit; stale, divergent and unavailable ancestry fails
 closed. Local uncommitted updates are serialized and rescanned, but independent
 workers must share one durable authority rather than clone stale state.

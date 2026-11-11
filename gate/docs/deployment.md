@@ -243,7 +243,10 @@ key. Rotate publisher tokens with their corresponding Access policy and gate gra
 
 Keep a recovery inventory of project/store IDs, bindings, principals, identity and
 publisher grants, and deployed versions in the operator's protected system of
-record. The status API is an inventory, not a full journal backup/export. A DO
+record. The status API lists workspaces, reader principals and identities; it does
+not export publisher grants or the journal. Preserve complete publisher provisioning
+inputs and write receipts; do not reconstruct unknown grants from reader inventory
+or individual successful requests. A DO
 restore also restores past grants and publication state, so reconcile revocations
 and provider resources before reopening traffic. No automatic backup/restore or
 workspace-topology migration is supplied by this recipe.

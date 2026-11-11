@@ -79,25 +79,15 @@ forking the ingestion implementation. Supply `workspace`, `project-id`,
 `with:`. Do not require TOML when the user chose workflow inputs. Keep
 `permissions: contents: read`; the shared workflow owns checkout and its DO lease.
 
-Expose a manual mode selector in the caller:
+The complete caller template is manual-only and defaults its `mode` selector to
+`plan`; it already passes the chosen mode to the reusable workflow. Copy that
+template without adding a push trigger for a new pilot unless automatic ingestion
+is already authorized. The reusable workflow itself retains its `sync` default;
+the caller's explicit mode is what makes this pilot a preview.
 
-```yaml
-on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Preview or publish the configured workspace
-        type: choice
-        required: true
-        default: plan
-        options: [plan, sync]
-```
-
-Set the calling job's `with.mode` to
-`${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'sync' }}`.
-This fragment extends the caller template; it is not a complete workflow by itself.
-For a new pilot, start manual-only unless automatic ingestion is already authorized.
-Once accepted, configure `push` on the actual default branch for after-merge updates.
+Once accepted, add `push.branches` with the actual default branch for after-merge
+updates, retaining `workflow_dispatch`. The template's existing mode expression
+uses the selected mode for manual runs and `sync` for pushes.
 If path filters are requested, include selected files and workflow/config changes;
 one repository's trigger does not observe pushes to another repository.
 
@@ -122,8 +112,12 @@ and registration before retrying; do not silently merge or create another reposi
 
 After a successful plan and explicit authorization to publish, dispatch `mode=sync`
 against the same reviewed
-configuration, wait for completion, and record the publication ID. Repeat unchanged
-sync: expect zero additions/replacements/deletions and unchanged publication identity.
+configuration, wait for completion, and record the publication ID. Repeat sync on
+the same source commits, selected bytes and processing configuration: expect zero
+additions/replacements/deletions and unchanged publication identity. Verify actual
+source revisions in both runs. A new commit outside the selected files can advance
+publication metadata while reusing every file ID; that is not a failed no-op test
+of the same snapshot, because the source revision changed.
 Use the real MCP reader to query a known indexed phrase and `get` its exact returned
 reference. Confirm the indexed repository/path and source revision.
 

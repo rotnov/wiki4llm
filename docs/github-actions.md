@@ -13,6 +13,14 @@ branch resolutions can observe different commits if upstream changes mid-run; fo
 reproducible execution, set both `uses:` and `tool-ref` to the same full commit SHA.
 Other symbolic tool refs are rejected. No release tag is required.
 
+The caller template has only `workflow_dispatch`, with a `mode` selector defaulting
+to `plan` and an explicit mapping to the reusable workflow. Copying it does not
+enable push ingestion. Qualify manual plan, authorized sync, repeat sync at the same
+source revisions/configuration, and real MCP retrieval first. For approved automatic
+updates, add `push.branches` for the consumer's actual default branch alongside
+`workflow_dispatch`; the existing mode expression selects `sync` for pushes.
+The reusable workflow's own default remains `sync` for callers that omit `mode`.
+
 ## Inputs
 
 All nonsecret configuration can be supplied in the caller job's `with:` block;

@@ -1,15 +1,22 @@
-# Consumer installation template; replace example identifiers and the source branch.
+# Manual-first consumer template; replace example identifiers and source branch.
+# Add a default-branch push trigger only after accepting plan/sync/no-op/MCP checks.
 name: Update project knowledge
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Preview or publish the configured workspace
+        type: choice
+        required: true
+        default: plan
+        options: [plan, sync]
 permissions:
   contents: read
 jobs:
   rag:
     uses: rotnov/wiki4llm/.github/workflows/ingest.yml@main
     with:
+      mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'sync' }}
       workspace: team-docs
       project-id: ${{ vars.WIKI_RAG_PROJECT_ID }}
       gate-origin: ${{ vars.WIKI_RAG_GATE_ORIGIN }}

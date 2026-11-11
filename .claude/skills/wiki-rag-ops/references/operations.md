@@ -9,7 +9,9 @@ The source of truth is `docs/remote-state.md`, `docs/github-actions.md` and
 The CLI updates a **whole configured workspace**, possibly containing several
 repositories. It compares captured content/configuration with the durable journal;
 it does not blindly upload everything or rely only on the triggering Git diff.
-Unchanged updates preserve publication identity. Remote state, leases and publication
+Updates with identical source revisions, selected bytes and processing configuration
+preserve publication identity. A new source commit can advance publication metadata
+without uploading any new files. Remote state, leases and publication
 live in the DO: no runner commits state to Git, and no Actions cache is authoritative.
 
 Before initial indexing, provision fresh empty stores and the exact project,
@@ -55,8 +57,9 @@ credentials. Preserve an existing explicit version decision. For reproducible
 execution, pin workflow and tool checkout to the same reviewed SHA; do not silently
 change an operator's chosen contract.
 
-Start with manual `plan`, then approved `sync`, then repeat unchanged sync and check
-MCP. Automatic pushes must be from the default branch; manual branch dispatch must
+The caller template is manual-only and defaults to `plan`. Run approved `sync`,
+then repeat sync at the same source revisions/configuration and check MCP before
+enabling an authorized push trigger. Automatic pushes must be from the default branch; manual branch dispatch must
 be allowed by the selected GitHub environment. PR/tag contexts are rejected. The
 dispatched workflow branch and each collection's configured source branch are
 different: report the actual indexed revision, not the workflow's revision.

@@ -5,7 +5,8 @@ Paths and commands are relative to the repository root unless stated otherwise.
 
 ## Inventory before mutation
 
-Obtain or reconstruct these nonsecret fields in the protected operator inventory:
+Obtain these nonsecret fields from protected records and supported read-only
+discovery. Not every field can be reconstructed through the current APIs:
 
 - Backend account ID, Worker name, active version, origin and route configuration.
 - Durable Object namespace, class and migration tags; fixed object `authority-v1`.
@@ -15,6 +16,15 @@ Obtain or reconstruct these nonsecret fields in the protected operator inventory
 - If present: front account/Worker/version/origin, its Access app/issuer/audience,
   transport identity and secret names, and backend `MCP_FORWARDER` binding.
 - MCP clients, callback URIs and separately recorded acceptance results.
+
+Admin `status` lists only workspaces, reader principals and identity mappings;
+it does not export publisher grants or the ingestion journal. Keep the complete
+latest publisher provisioning JSON and successful write receipts in protected
+records. A publisher's successful preview proves access to the requested workspace,
+not its full grant set. If those records are missing, stop before modifying an
+existing publisher while promising to preserve unknown rights. Obtain the current
+configuration or an explicitly approved complete replacement; do not infer grants
+from Access policies, visible reader workspaces or a few successful requests.
 
 Credentials stay in the secret manager. Do not commit installation inventories to
 this public repository. Account IDs are not passwords, but a deployment-specific

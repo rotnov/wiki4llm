@@ -94,6 +94,9 @@ create a gate grant. An OpenAI organization admin key is never a runtime key.
 - **Data is in the authority, not the repository.** Keep the existing Worker,
   namespace, fixed `authority-v1` object and primary issuer/audience. A source
   rename or new login hostname must not silently create an empty replacement.
+- **Publisher grants are not discoverable through admin status.** Obtain their
+  complete current configuration from protected operator records before replacing
+  an existing grant. A successful publisher preview does not reveal all its rights.
 - **Reader front and backend differ.** The front exposes only `/mcp` POST and
   `/identity` GET. Administration and ingestion still use the backend origin.
 - **Identity is issuer plus subject.** Read `/identity` after real authentication;
