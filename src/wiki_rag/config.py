@@ -32,6 +32,13 @@ def integer(value, minimum, maximum):
     return value
 
 
+def selection_limit(value, maximum):
+    """Only the explicit sentinel disables a selection budget."""
+    if value == "unlimited":
+        return None
+    return integer(value, 1, maximum)
+
+
 def patterns(value):
     if not isinstance(value, list) or not all(isinstance(x, str) and x for x in value):
         raise RagError("glob list must contain strings")
@@ -77,9 +84,9 @@ class Config:
     api_key_env: str
     state: Path | None
     collections: tuple[Collection, ...]
-    max_file_bytes: int
-    max_total_bytes: int
-    max_files: int
+    max_file_bytes: int | None
+    max_total_bytes: int | None
+    max_files: int | None
     chunk_size: int
     chunk_overlap: int
 
@@ -235,9 +242,9 @@ def config_from_mapping(raw, path):
         env,
         state,
         tuple(collections),
-        integer(raw.get("max_file_bytes", 2_000_000), 1, 20_000_000),
-        integer(raw.get("max_total_bytes", 50_000_000), 1, 200_000_000),
-        integer(raw.get("max_files", 10000), 1, 100000),
+        selection_limit(raw.get("max_file_bytes", 2_000_000), 20_000_000),
+        selection_limit(raw.get("max_total_bytes", 50_000_000), 200_000_000),
+        selection_limit(raw.get("max_files", 10000), 100000),
         size,
         overlap,
         remote,

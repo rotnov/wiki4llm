@@ -26,25 +26,28 @@ The reusable workflow's own default remains `sync` for callers that omit `mode`.
 All nonsecret configuration can be supplied in the caller job's `with:` block;
 no TOML file or configuration checkout is needed in that mode.
 
-| Input                | Default              | Meaning                                                               |
-| -------------------- | -------------------- | --------------------------------------------------------------------- |
-| `workspace`          | Empty                | Workspace slug; selects direct configuration with the next two inputs |
-| `project-id`         | Empty                | OpenAI project identifier                                             |
-| `collections`        | Empty                | JSON array of collection objects                                      |
-| `max-files`          | 10000                | Maximum selected files, across all collections                        |
-| `max-file-bytes`     | 2000000              | Maximum size of one selected file                                     |
-| `max-total-bytes`    | 50000000             | Maximum total selected bytes                                          |
-| `chunk-size`         | 800                  | Chunk size in tokens                                                  |
-| `chunk-overlap`      | 400                  | Overlap in tokens, at most half the chunk size                        |
-| `gate-origin`        | Required             | Exact HTTPS origin without a path or trailing slash                   |
-| `mode`               | `sync`               | `sync` publishes incrementally; `plan` reads without provider writes  |
-| `lease-wait-seconds` | 300                  | Lease wait, integer from 0 to 1800                                    |
-| `environment`        | `wiki-rag-publisher` | GitHub deployment environment                                         |
-| `tool-repository`    | `rotnov/wiki4llm`    | Tool repository                                                       |
-| `tool-ref`           | `main`               | Follow upstream, or supply a full commit SHA                          |
-| `config`             | Empty                | Optional committed TOML path, instead of direct configuration         |
-| `config-repository`  | Caller               | Optional separate repository for TOML configuration                   |
-| `config-ref`         | Triggering SHA       | Required when using another config repository                         |
+| Input                   | Default              | Meaning                                                               |
+| ----------------------- | -------------------- | --------------------------------------------------------------------- |
+| `workspace`             | Empty                | Workspace slug; selects direct configuration with the next two inputs |
+| `project-id`            | Empty                | OpenAI project identifier                                             |
+| `collections`           | Empty                | JSON array of collection objects                                      |
+| `max-files`             | 10000                | Maximum selected files, across all collections                        |
+| `max-file-bytes`        | 2000000              | Maximum size of one selected file                                     |
+| `max-total-bytes`       | 50000000             | Maximum total selected bytes                                          |
+| `unlimited-files`       | `false`              | Disable only the direct-input file-count selection budget             |
+| `unlimited-file-bytes`  | `false`              | Disable only the direct-input per-file byte selection budget          |
+| `unlimited-total-bytes` | `false`              | Disable only the direct-input total-byte selection budget             |
+| `chunk-size`            | 800                  | Chunk size in tokens                                                  |
+| `chunk-overlap`         | 400                  | Overlap in tokens, at most half the chunk size                        |
+| `gate-origin`           | Required             | Exact HTTPS origin without a path or trailing slash                   |
+| `mode`                  | `sync`               | `sync` publishes incrementally; `plan` reads without provider writes  |
+| `lease-wait-seconds`    | 300                  | Lease wait, integer from 0 to 1800                                    |
+| `environment`           | `wiki-rag-publisher` | GitHub deployment environment                                         |
+| `tool-repository`       | `rotnov/wiki4llm`    | Tool repository                                                       |
+| `tool-ref`              | `main`               | Follow upstream, or supply a full commit SHA                          |
+| `config`                | Empty                | Optional committed TOML path, instead of direct configuration         |
+| `config-repository`     | Caller               | Optional separate repository for TOML configuration                   |
+| `config-ref`            | Triggering SHA       | Required when using another config repository                         |
 
 Each collection has `name`, `repository`, `branch`, `vector_store_id`, `include`
 and `extensions`, plus optional `exclude`. Include/exclude values and extensions
@@ -64,6 +67,36 @@ must be prepared before the engine publishes anything. The gate's remote authori
 still verifies the complete workspace/project/collection bindings; caller inputs
 do not grant access. The engine rejects stale or divergent snapshots under its
 lease. A caller updates the whole configured workspace, not just its own repository.
+
+## Selection budgets
+
+Numeric `max-files`, `max-file-bytes` and `max-total-bytes` retain their input types,
+defaults and valid ranges. For direct configuration, explicitly opt out of individual
+selection budgets using boolean inputs in the caller's `with:` block:
+
+```yaml
+unlimited-files: true
+unlimited-file-bytes: true
+unlimited-total-bytes: true
+```
+
+Each `true` takes precedence over its matching numeric budget; the numeric input
+must still be valid. Omitted or `false` switches keep the numeric budget. Strings
+such as `"true"`, `0`, negative numbers and sentinel numeric values are rejected.
+In TOML configuration mode, `true` switches are rejected before checkout: set
+`max_files = "unlimited"`, `max_file_bytes = "unlimited"` or
+`max_total_bytes = "unlimited"` in the committed TOML instead. No switch overrides
+a committed config file.
+
+These switches remove selection budgets only. The gate still permits at most
+10,000 active files across the workspace, and its manifest, journal, collection
+and request limits remain unchanged; see the [protocol](../gate/docs/ingestion-state-protocol.md).
+Provider limits, the 30-minute workflow timeout and runner RAM/disk remain finite.
+All source bytes are kept in memory and rescanned before publishing, so large
+sources can exceed runner capacity even with valid manifests. See the
+[selection contract](../README.md#configuration-and-selection) for memory and
+provider constraints. Use `mode: plan` to review selection first; a preview is not
+proof that the provider will accept or finish a later upload.
 
 ## Secrets passed by the caller
 

@@ -121,7 +121,43 @@ relabelled as text.
 
 Selected unreadable or oversized files abort before uploads. Defaults are 2 MB
 per file, 50 MB total, and 10,000 selected files per run; configurable ceilings
-are 20 MB, 200 MB, and 100,000 files. Limits are decimal bytes. Chunking is
+are 20 MB, 200 MB, and 100,000 files. Limits are decimal bytes. Each selection
+budget can instead be explicitly disabled with the exact TOML string `"unlimited"`:
+
+```toml
+# Top-level settings, before any [table]. Omit a setting to keep its default.
+max_files = "unlimited"
+max_file_bytes = "unlimited"
+max_total_bytes = "unlimited"
+```
+
+Use the existing `wiki-rag --config wiki-rag.toml plan` command to inspect this
+selection before `index --apply` or `update --apply`. Budgets are independent;
+for example, disabling the total still leaves the default per-file/count budgets.
+Zero, negative numbers, booleans and other strings do not mean unlimited. Existing
+numeric values and their accepted ranges are unchanged. GitHub Actions offers
+[explicit boolean switches](docs/github-actions.md#selection-budgets) while keeping
+its numeric input types compatible.
+
+**Unlimited selection budgets do not mean an unlimited service.** Remote publication
+still enforces the [protocol limits](gate/docs/ingestion-state-protocol.md), including
+10,000 active files across the workspace, 20 collections, an 8 MiB manifest and
+100,000 journal operations including tombstones. Source/path integrity, secret
+exclusions, ownership, active-file authorization and all transport/time bounds remain.
+A protocol-limit error aborts the run; the scanner never silently truncates the corpus.
+Local selection can exceed the remote file cap, but importing its manifest into a
+gate still requires that gate's validation. OpenAI's [Retrieval limits](https://developers.openai.com/api/docs/guides/retrieval#limits)
+currently specify 512 MB and 5,000,000 tokens per file; provider acceptance, quotas
+and rate limits still apply. A successful plan does not establish provider acceptance.
+
+The scanner retains all selected content in memory and captures another snapshot
+before publication. Hashing, decoding and uploads add temporary allocations; peak
+memory can substantially exceed the selected bytes. Disabling budgets can exhaust
+RAM/disk/time or increase provider storage costs. It does not enable streaming,
+automatic splitting or unbounded retries. Set finite budgets for unattended runs
+unless their removal is intentional and the source size has been reviewed.
+
+Chunking is
 explicitly static: default 800 tokens with 400 overlap, configurable within
 100–4096 tokens and overlap at most half the chunk size. Content hash and
 per-file preprocessing and chunking configuration jointly determine a file version.

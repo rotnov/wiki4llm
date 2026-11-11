@@ -28,6 +28,18 @@ on:
       max-total-bytes:
         type: number
         default: 50000000
+      unlimited-files:
+        type: boolean
+        default: false
+        description: Disable max-files selection budget in direct input mode; remote protocol limits remain
+      unlimited-file-bytes:
+        type: boolean
+        default: false
+        description: Disable max-file-bytes selection budget in direct input mode; provider limits remain
+      unlimited-total-bytes:
+        type: boolean
+        default: false
+        description: Disable max-total-bytes selection budget in direct input mode; runtime limits remain
       chunk-size:
         type: number
         default: 800
@@ -127,6 +139,10 @@ jobs:
           direct = any(inputs.get(k) for k in ("workspace", "project-id", "collections"))
           require(not direct or all(inputs.get(k) for k in ("workspace", "project-id", "collections")), "workspace, project-id and collections are required together")
           require(not direct or not any(inputs.get(k) for k in ("config", "config-repository", "config-ref")), "choose workflow parameters or committed config, not both")
+          for name in ("unlimited-files", "unlimited-file-bytes", "unlimited-total-bytes"):
+              value = inputs.get(name, False)
+              require(type(value) is bool, name + " must be a boolean")
+              require(direct or not value, name + " requires direct inputs; set limits in TOML for config mode")
           require(os.environ["MODE"] in {"plan", "sync"}, "mode must be plan or sync")
           path = pathlib.PurePosixPath(os.environ["CONFIG_PATH"])
           require(not path.is_absolute() and ".." not in path.parts and "\\" not in str(path), "config must stay inside its repository")

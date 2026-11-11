@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from .config import RagError, config_from_mapping, keys, lexical_path, load_config
+from .config import RagError, config_from_mapping, integer, keys, lexical_path, load_config
 from .output import summarize
 from .provider import OpenAIProvider
 from .remote_engine import run_remote
@@ -158,9 +158,15 @@ def workflow_config(inputs, workspace):
         "chunk-size": 800,
         "chunk-overlap": 400,
     }
+    unlimited = {
+        "unlimited-files": ("max_files", 100000),
+        "unlimited-file-bytes": ("max_file_bytes", 20_000_000),
+        "unlimited-total-bytes": ("max_total_bytes", 200_000_000),
+    }
     keys(
         inputs,
         set(limits)
+        | set(unlimited)
         | {
             "workspace",
             "project-id",
@@ -202,6 +208,14 @@ def workflow_config(inputs, workspace):
         "collections": [dict(c, root=".") for c in collections],
         **{key.replace("-", "_"): inputs.get(key, default) for key, default in limits.items()},
     }
+    for switch, (field, maximum) in unlimited.items():
+        enabled = inputs.get(switch, False)
+        if type(enabled) is not bool:
+            raise RagError(f"{switch} must be a boolean")
+        # Keep the workflow's numeric input contract even when its budget is disabled.
+        integer(raw[field], 1, maximum)
+        if enabled:
+            raw[field] = "unlimited"
     return config_from_mapping(raw, workspace / "workflow-inputs.toml")
 
 

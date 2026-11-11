@@ -401,7 +401,7 @@ def test_invalid_branch_never_runs_engine(repo, credentials, branch):
     assert all(c.closed for c in clients)
 
 
-@pytest.mark.parametrize("direct_inputs", [False, True])
+@pytest.mark.parametrize("direct_inputs", [False, True, "unlimited"])
 def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     repo, tmp_path, credentials, monkeypatch, capsys, direct_inputs
 ):
@@ -412,7 +412,12 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     from wiki_rag.remote_state import RemoteState
 
     if direct_inputs:
-        monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", json.dumps(workflow_parameters()))
+        params = workflow_parameters()
+        if direct_inputs == "unlimited":
+            params.update(
+                {f"unlimited-{name}": True for name in ("files", "file-bytes", "total-bytes")}
+            )
+        monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", json.dumps(params))
     else:
         configuration(repo)
     source = source_repo(tmp_path)

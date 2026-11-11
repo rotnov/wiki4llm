@@ -93,11 +93,11 @@ def safe_read(root, relative, limit):
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise RagError("selected file is not regular")
-        if info.st_size > limit:
+        if limit is not None and info.st_size > limit:
             raise RagError("selected file exceeds size limit")
         with os.fdopen(os.dup(fd), "rb") as stream:
-            data = stream.read(limit + 1)
-        if len(data) > limit:
+            data = stream.read() if limit is None else stream.read(limit + 1)
+        if limit is not None and len(data) > limit:
             raise RagError("selected file exceeds size limit")
         return data
     except FileNotFoundError:
@@ -272,7 +272,9 @@ def scan(cfg):
                 continue
             total += len(data)
             count += 1
-            if total > cfg.max_total_bytes or count > cfg.max_files:
+            if (cfg.max_total_bytes is not None and total > cfg.max_total_bytes) or (
+                cfg.max_files is not None and count > cfg.max_files
+            ):
                 raise RagError("selection exceeds total size or file count limit")
             preprocessing = "pdf-native-v1" if path.suffix.lower() == ".pdf" else "utf8-text-v1"
             processing = {**cfg.processing, "preprocessing": preprocessing}
@@ -283,7 +285,10 @@ def scan(cfg):
             if cfg.remote_state and not committed:
                 raise RagError("remote source requires literal HEAD blob bytes")
             if cfg.remote_state and count > 10000:
-                raise RagError("remote manifest exceeds 10000 files")
+                raise RagError(
+                    "remote manifest exceeds 10000 files (protocol limit; "
+                    "unlimited selection does not remove it)"
+                )
             files[relative] = SourceFile(
                 relative,
                 data,
