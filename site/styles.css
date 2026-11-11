@@ -631,3 +631,67 @@ nav a::after {
     gap: 5px;
   }
 }
+
+.skill-install {
+  max-width: 660px;
+  margin-top: 28px;
+}
+.skill-install h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+.install-command-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid #315574;
+  border-radius: 5px;
+  background: #0b1e35;
+}
+#install-command {
+  flex: 1;
+  min-width: 0;
+  color: var(--accent);
+  font:
+    13px/1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.install-copy {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid #376487;
+  border-radius: 4px;
+  padding: 10px 14px;
+  background: #102b48;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+}
+.install-copy:hover {
+  background: #133251;
+}
+.install-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.install-feedback {
+  min-height: 1.5em;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .install-command-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .install-copy {
+    align-self: flex-start;
+  }
+}
