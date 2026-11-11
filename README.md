@@ -7,7 +7,7 @@ MCP gateway, and a reusable GitHub Actions workflow in one repository.
 - **[Connect a repository](docs/github-actions.md)** — workflow inputs and optional GitHub token.
 - **[Operate the gate](gate/README.md)** — Cloudflare or native Node/QMD runtime.
 - **[Develop and verify](docs/development.md)** — local checks and public release process.
-- **[Operator skill](.claude/skills/wiki-rag-ops/SKILL.md)** — deployment, access,
+- **[Operator skill](skills/wiki4llm/SKILL.md)** — deployment, access,
   OAuth clients, ingestion and recovery procedures for agents.
 - **[Public explainer](site/index.html)** — purpose and principles; [site maintenance](docs/public-site.md).
 
@@ -24,6 +24,19 @@ in `gate/`. The repository does not include a hosted account or service subscrip
 For CI, the [shared GitHub Actions workflow](docs/github-actions.md) accepts
 direct workflow parameters (or committed TOML) and gate/OpenAI secrets from each caller. Its separate GitHub
 checkout token is optional. Consumer installation and credential setup are explicit operator steps.
+
+## Install the agent skill
+
+Install the wiki4llm skill and choose your coding agent:
+
+```sh
+npx skills add rotnov/wiki4llm@wiki4llm
+```
+
+Add `--global` to make it available across projects. The source lives in
+[`skills/wiki4llm/SKILL.md`](skills/wiki4llm/SKILL.md), with bundled procedures
+under `references/`. Skill installation does not connect the MCP server or grant
+workspace access; follow the skill's client-connection procedure separately.
 
 ## Quick start
 

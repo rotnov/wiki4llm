@@ -5,7 +5,9 @@ import {
   type JSONWebKeySet,
 } from "jose";
 import { GateError } from "../errors.js";
+import { emailAddress } from "../email.js";
 export interface Identity {
+  email?: string;
   issuer: string;
   key: string;
   expiresAt: number;
@@ -169,7 +171,13 @@ export class AccessVerifier {
             ? "service:" + p.common_name
             : "";
       if (!validIdentityKey(key)) fail();
-      return { issuer: this.issuer, key, expiresAt: p.exp! * 1000 };
+      const email = key.startsWith("user:") ? emailAddress(p.email) : undefined;
+      return {
+        issuer: this.issuer,
+        key,
+        expiresAt: p.exp! * 1000,
+        ...(email ? { email } : {}),
+      };
     } catch {
       return fail();
     } finally {

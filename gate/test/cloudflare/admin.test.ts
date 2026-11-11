@@ -177,3 +177,70 @@ test("operator CLI validates explicit status flags and rejects accidental writes
     parse(["https://gate.example", "principal", "--kind", "principals"]),
   );
 });
+
+test("invitation CLI supports create, inspect and revoke without accepting unexpected response data", async () => {
+  for (const command of ["invite", "invite-status", "invite-revoke"] as const) {
+    assert.equal(
+      parseAdminArguments(["https://gate.example", command, "request.json"])
+        .command,
+      command,
+    );
+    const result =
+      command === "invite"
+        ? {
+            id: "123e4567-e89b-42d3-a456-426614174000",
+            url: "https://gate.example/invite/" + "a".repeat(64),
+            expiresAt: Date.now() + 10000,
+          }
+        : command === "invite-status"
+          ? {
+              id: "123e4567-e89b-42d3-a456-426614174000",
+              email: "person@example.org",
+              issuer: "https://example.cloudflareaccess.com",
+              workspaces: ["example"],
+              expiresAt: Date.now() + 10000,
+              status: "pending",
+            }
+          : { ok: true };
+    assert.deepEqual(
+      await adminRequest(
+        "https://gate.example",
+        command,
+        {},
+        { GATE_ACCESS_ASSERTION: "test" },
+        async () => Response.json(result),
+      ),
+      result,
+    );
+    await assert.rejects(
+      adminRequest(
+        "https://gate.example",
+        command,
+        {},
+        { GATE_ACCESS_ASSERTION: "test" },
+        async () => Response.json({ ...result, secret: "unexpected" }),
+      ),
+    );
+  }
+});
+
+test("invitation status preserves email addresses accepted by invitation creation", async () => {
+  const result = {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    email: "a/b@example.org",
+    issuer: "https://example.cloudflareaccess.com",
+    workspaces: ["example"],
+    expiresAt: Date.now() + 10000,
+    status: "pending",
+  };
+  assert.deepEqual(
+    await adminRequest(
+      "https://gate.example",
+      "invite-status",
+      { id: result.id },
+      { GATE_ACCESS_ASSERTION: "test" },
+      async () => Response.json(result),
+    ),
+    result,
+  );
+});

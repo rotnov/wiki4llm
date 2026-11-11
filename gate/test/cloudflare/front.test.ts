@@ -119,3 +119,70 @@ test("front forwards only reader surfaces with a separate signed assertion and s
     globalThis.fetch = original;
   }
 });
+
+test("front carries invitation browser origin and security headers without opening admin routes", async () => {
+  const original = globalThis.fetch;
+  const path = "/invite/" + "a".repeat(64);
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    assert.equal(request.url, env.BACKEND_ORIGIN + path);
+    assert.equal(request.headers.get("origin"), env.PUBLIC_ORIGIN);
+    return new Response("page", {
+      headers: {
+        "content-type": "text/html",
+        "content-security-policy": "default-src 'none'",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  };
+  try {
+    const headers = {
+      "cf-access-jwt-assertion": "signed",
+      "content-type": "application/json",
+      origin: env.PUBLIC_ORIGIN,
+    };
+    const result = await front.fetch(
+      new Request(env.PUBLIC_ORIGIN + path, {
+        method: "POST",
+        headers,
+        body: "{}",
+      }),
+      env,
+    );
+    assert.equal(result.status, 200);
+    assert.equal(
+      result.headers.get("content-security-policy"),
+      "default-src 'none'",
+    );
+    assert.equal(result.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(
+      (
+        await front.fetch(
+          new Request(env.PUBLIC_ORIGIN + path, {
+            method: "POST",
+            headers: { ...headers, origin: "https://evil.example" },
+            body: "{}",
+          }),
+          env,
+        )
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await front.fetch(
+          new Request(env.PUBLIC_ORIGIN + "/admin/invitation", {
+            method: "POST",
+            headers,
+            body: "{}",
+          }),
+          env,
+        )
+      ).status,
+      403,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});

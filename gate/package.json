@@ -11,8 +11,8 @@
     "test": "tsx --test test/*.test.ts",
     "check": "tsc --noEmit",
     "start": "node dist/src/cli.js serve",
-    "format": "prettier --write src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
-    "format:check": "prettier --check src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
+    "format": "prettier --write src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/invitations.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
+    "format:check": "prettier --check src test scripts README.md AGENTS.md package.json tsconfig.json docs/cloudflare.md docs/invitations.md docs/deployment.md docs/ingestion-state-protocol.md wrangler.jsonc tsconfig.worker.json",
     "test:models": "tsx scripts/qualify-models.ts",
     "test:compose": "tsx scripts/smoke-compose.ts",
     "check:worker": "tsc -p tsconfig.worker.json",
@@ -22,7 +22,7 @@
     "admin:worker": "tsx scripts/cloudflare-admin.ts",
     "postinstall": "node scripts/repair-miniflare-types.ts",
     "repair:tooling": "node scripts/repair-miniflare-types.ts",
-    "check:docs": "prettier --check ../README.md ../AGENTS.md ../docs ../examples ../.github ../.claude/skills"
+    "check:docs": "prettier --check ../README.md ../AGENTS.md ../docs ../examples ../.github ../skills"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

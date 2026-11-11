@@ -250,3 +250,8 @@ or individual successful requests. A DO
 restore also restores past grants and publication state, so reconcile revocations
 and provider resources before reopening traffic. No automatic backup/restore or
 workspace-topology migration is supplied by this recipe.
+
+## Reader invitation links
+
+See [email-bound invitation links](invitations.md) for create/status/revoke commands,
+browser authentication prerequisites, reader-front configuration and acceptance checks.
