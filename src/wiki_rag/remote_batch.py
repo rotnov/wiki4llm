@@ -159,15 +159,37 @@ def stage_files(cfg, state, selected, provider):
             confirmed = []
             for oid, c, f in uncertain:
                 attached = found.get(ops[oid]["file_id"])
-                if (
-                    not attached
-                    or attached.get("id") != ops[oid]["file_id"]
-                    or attached.get("attributes") != attributes(c, f, oid, ops[oid])
-                    or attached.get("status")
-                    not in {"in_progress", "completed", "failed", "cancelled"}
-                    or attached.get("vector_store_id", store) != store
-                ):
-                    raise RagError("unresolved attachment outcome; retry reconciliation later")
+                reason = None
+                expected = attributes(c, f, oid, ops[oid])
+                if not attached:
+                    reason = "missing attachment"
+                elif attached.get("id") != ops[oid]["file_id"]:
+                    reason = "id mismatch"
+                elif attached.get("attributes") != expected:
+                    actual = attached.get("attributes")
+                    field = next(
+                        (
+                            k
+                            for k, v in expected.items()
+                            if not isinstance(actual, dict) or actual.get(k) != v
+                        ),
+                        "keys",
+                    )
+                    reason = f"attributes.{field} mismatch"
+                elif attached.get("status") not in {
+                    "in_progress",
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }:
+                    reason = "status invalid"
+                elif attached.get("vector_store_id", store) != store:
+                    reason = "vector_store_id mismatch"
+                if reason:
+                    raise RagError(
+                        f"unresolved attachment outcome: {len(found)}/{len(uncertain)} found; "
+                        f"{reason}; retry reconciliation later"
+                    )
                 ops[oid]["phase"] = "attached"
                 confirmed.append(oid)
             checkpoint(confirmed)

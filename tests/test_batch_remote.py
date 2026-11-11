@@ -201,9 +201,27 @@ def test_missing_uncertain_attachment_is_never_recreated(tmp_path, repo, monkeyp
     with pytest.raises(RagError):
         invoke(cfg, authority, provider, monkeypatch)
     provider.attachments.clear()
-    with pytest.raises(RagError, match="unresolved"):
+    with pytest.raises(RagError, match="0/1 found; missing attachment"):
         invoke(cfg, authority, provider, monkeypatch)
     assert len(provider.batches) == 1
+
+
+@pytest.mark.parametrize("field", ["id", "vector_store_id", "attributes", "status"])
+def test_uncertain_attachment_diagnostics_identify_boundary_without_values(
+    tmp_path, repo, monkeypatch, field
+):
+    cfg, authority, provider = setup_batch(tmp_path, repo)
+    provider.unknown_attach = True
+    with pytest.raises(RagError):
+        invoke(cfg, authority, provider, monkeypatch)
+    item = next(iter(provider.attachments.values()))
+    item[field] = {"private": "value"} if field == "attributes" else "private-value"
+    with pytest.raises(RagError) as raised:
+        invoke(cfg, authority, provider, monkeypatch)
+    message = str(raised.value)
+    assert "1/1 found" in message and field in message
+    assert "private" not in message and "0.md" not in message and "file-" not in message
+    assert len(provider.batches) == 1 and provider.uploads == 1
 
 
 def test_batch_provider_request_metadata_and_paginated_reconciliation(tmp_path, repo, monkeypatch):
