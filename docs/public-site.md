@@ -13,5 +13,7 @@ The workflow uses GitHub's default Pages hosting without a custom domain.
 
 For local inspection, serve `site/` with a static HTTP server. Check desktop and
 mobile layouts, anchor navigation, keyboard focus and content scope before pushing.
+When changing CSS, update the stylesheet query version in `site/index.html` to
+the first 12 characters of its SHA-256 so existing readers fetch the new styles.
 Read back the deployed HTML/CSS and successful Pages run before sharing the link.
 Page changes do not deploy the MCP gate, alter reader rights or index documents.
