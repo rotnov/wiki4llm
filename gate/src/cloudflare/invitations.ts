@@ -6,7 +6,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { emailAddress } from "../email.js";
 import { GateError } from "../errors.js";
-import { validateGrants, validateSlug, type Grants } from "../policy.js";
+import { validateGrants, validatePattern, type Grants } from "../policy.js";
 import type { Identity } from "./access.js";
 import type { CloudState } from "./state.js";
 
@@ -43,8 +43,12 @@ export class Invitations {
     const a = input.parse(value),
       workspaces = [...new Set(a.workspaces)];
     for (const workspace of workspaces) {
-      validateSlug(workspace);
-      if (!this.rows("SELECT id FROM workspaces WHERE id=?", workspace).length)
+      validatePattern(workspace);
+      if (
+        workspace === "*" ||
+        (!workspace.endsWith("-*") &&
+          !this.rows("SELECT id FROM workspaces WHERE id=?", workspace).length)
+      )
         throw new GateError("INVALID_INPUT");
     }
     const id = randomUUID(),

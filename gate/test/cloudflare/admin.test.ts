@@ -246,3 +246,34 @@ test("invitation status preserves email addresses accepted by invitation creatio
     result,
   );
 });
+
+test("invitation status CLI accepts namespace patterns without widening to global access", async () => {
+  const base = {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    email: "person@example.org",
+    issuer: "https://example.cloudflareaccess.com",
+    expiresAt: Date.now() + 10000,
+    status: "pending",
+  };
+  const result = { ...base, workspaces: ["amplifier-*"] };
+  assert.deepEqual(
+    await adminRequest(
+      "https://gate.example",
+      "invite-status",
+      { id: base.id },
+      { GATE_ACCESS_ASSERTION: "test" },
+      async () => Response.json(result),
+    ),
+    result,
+  );
+  for (const pattern of ["*", "amplifier*", "amplifier-**"])
+    await assert.rejects(
+      adminRequest(
+        "https://gate.example",
+        "invite-status",
+        { id: base.id },
+        { GATE_ACCESS_ASSERTION: "test" },
+        async () => Response.json({ ...base, workspaces: [pattern] }),
+      ),
+    );
+});
