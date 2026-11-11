@@ -161,6 +161,29 @@ def stage_files(cfg, state, selected, provider):
                 attached = found.get(ops[oid]["file_id"])
                 reason = None
                 expected = attributes(c, f, oid, ops[oid])
+                repair = getattr(provider, "restore_owned_attributes", None)
+                if (
+                    repair is not None
+                    and attached
+                    and attached.get("attributes") == {}
+                    and attached.get("id") == ops[oid]["file_id"]
+                    and attached.get("vector_store_id") == store
+                ):
+                    remote.guard()
+                    attached = repair(
+                        store,
+                        ops[oid]["file_id"],
+                        filename=ops[oid]["filename"],
+                        sha=ops[oid]["sha256"],
+                        content=f.content,
+                        attributes=expected,
+                        chunking=cfg.processing["chunking"],
+                    )
+                    found[ops[oid]["file_id"]] = attached
+                    print(
+                        "wiki-rag: reconciled empty attributes for an owned attachment",
+                        file=sys.stderr,
+                    )
                 if not attached:
                     reason = "missing attachment"
                 elif attached.get("id") != ops[oid]["file_id"]:

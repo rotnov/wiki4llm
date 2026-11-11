@@ -52,6 +52,22 @@ coordinator thread, and all dispatched workers drain before clients close. On an
 ordinary upload failure, successful sibling receipts are persisted; authority loss
 prevents further journal writes and leaves dispatched outcomes for reconciliation.
 
+An unknown attachment result is reconciled by immutable File ID and the original
+operation attributes. For an existing attachment with exactly empty attributes,
+the OpenAI adapter can finish the pending metadata write. It rehashes the current
+source against the durable acknowledged-upload receipt, verifies the provider File
+ID, unique upload filename, byte count and purpose, and checks attachment identity,
+status and chunking. Content identity relies on that acknowledged upload and its
+immutable File ID; this recovery does not claim a fresh download/hash of provider
+bytes. It rechecks attributes before updating and requires matching readback before
+checkpointing. Missing attachments, conflicting nonempty metadata or failed proof
+remain errors. The existing file and attachment are retained.
+
+Attachment batches retry an explicit HTTP 429 rejection at most twice, using
+`Retry-After` capped at 60 seconds (60 seconds if absent or malformed), and check
+the writer lease before every attempt. Unknown create outcomes such as HTTP 500
+or a transport failure keep their durable intent for reconciliation.
+
 After attachment submission and a matching rescan, `submit` durably captures the
 exact manifest. The CLI returns `mode: submitted` and `job_id`, without waiting for
 OpenAI indexing. A Durable Object alarm verifies readiness and atomically publishes

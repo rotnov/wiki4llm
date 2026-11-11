@@ -60,21 +60,30 @@ class OpenAIProvider:
     def close(self):
         self.client.close()
 
-    def request(self, method, path, *, missing_ok=False, **kwargs):
-        attempts = 3 if method in {"GET", "DELETE"} else 1
+    def request(self, method, path, *, missing_ok=False, retry_rate_limit=False, **kwargs):
+        safe_replay = method in {"GET", "DELETE"}
+        attempts = 3 if safe_replay or retry_rate_limit else 1
         for attempt in range(attempts):
             if method not in {"GET", "HEAD"}:
                 self.mutation_guard()
             try:
                 response = self.client.request(method, path, **kwargs)
             except httpx.TransportError:
-                if attempt + 1 < attempts:
+                if safe_replay and attempt + 1 < attempts:
                     self.sleep(2**attempt)
                     continue
                 raise RagError("provider transport failed; write outcome may be unknown") from None
             if response.status_code == 404 and missing_ok:
                 return None
-            if response.status_code in {408, 429, 500, 502, 503, 504} and attempt + 1 < attempts:
+            if response.status_code == 429 and retry_rate_limit and attempt + 1 < attempts:
+                delay = response.headers.get("Retry-After", "60")
+                self.sleep(max(1, min(60, int(delay))) if delay.isdecimal() else 60)
+                continue
+            if (
+                safe_replay
+                and response.status_code in {408, 429, 500, 502, 503, 504}
+                and attempt + 1 < attempts
+            ):
                 self.sleep(2**attempt)
                 continue
             if not 200 <= response.status_code < 300:
@@ -177,7 +186,12 @@ class OpenAIProvider:
                     "chunking_strategy": chunking,
                 }
             )
-        data = self.json("POST", f"vector_stores/{store}/file_batches", json={"files": files})
+        data = self.json(
+            "POST",
+            f"vector_stores/{store}/file_batches",
+            json={"files": files},
+            retry_rate_limit=True,
+        )
         identifier(data.get("id"), "vsfb_")
         if data.get("status") not in {"in_progress", "completed", "failed", "cancelled"}:
             raise RagError("invalid provider batch response; write outcome may be unknown")
@@ -233,6 +247,57 @@ class OpenAIProvider:
     def attachment(self, store, fid):
         store, fid = identifier(store, "vs_"), identifier(fid, "file-")
         return self.json("GET", f"vector_stores/{store}/files/{fid}", missing_ok=True)
+
+    def restore_owned_attributes(self, store, fid, *, filename, sha, content, attributes, chunking):
+        """Finish empty metadata for a durably acknowledged upload, never adopt a file."""
+        store, fid = identifier(store, "vs_"), identifier(fid, "file-")
+        if (
+            digest(content) != sha
+            or attributes.get("sha256") != sha
+            or not attributes.get("operation_id")
+        ):
+            raise RagError("attachment recovery source does not match its upload receipt")
+
+        def inspect():
+            item = self.attachment(store, fid)
+            if not item or item.get("id") != fid or item.get("vector_store_id") != store:
+                raise RagError("attachment recovery identity mismatch")
+            if item.get("status") not in {"in_progress", "completed", "failed", "cancelled"}:
+                raise RagError("attachment recovery status invalid")
+            if item.get("attributes") == attributes:
+                return item
+            if item.get("attributes") != {}:
+                raise RagError("attachment recovery refuses nonempty or unknown attributes")
+            if item["status"] not in {"in_progress", "completed"}:
+                raise RagError(
+                    f"attachment recovery cannot repair empty metadata on a {item['status']} file"
+                )
+            if item.get("chunking_strategy") != chunking:
+                raise RagError("attachment recovery chunking mismatch")
+            return item
+
+        current = inspect()
+        if current["attributes"] == attributes:
+            return current
+        uploaded = self.json("GET", f"files/{fid}")
+        if (
+            uploaded.get("id") != fid
+            or uploaded.get("filename") != filename
+            or uploaded.get("purpose") != "assistants"
+            or type(uploaded.get("bytes")) is not int
+            or uploaded["bytes"] != len(content)
+        ):
+            raise RagError("attachment recovery file does not match its acknowledged upload")
+        # The File ID and source hash were persisted after a successful upload.
+        # Recheck mutable attachment attributes after inspecting that immutable File.
+        current = inspect()
+        if current["attributes"] == attributes:
+            return current
+        self.request("POST", f"vector_stores/{store}/files/{fid}", json={"attributes": attributes})
+        current = inspect()
+        if current["attributes"] != attributes:
+            raise RagError("attachment metadata recovery readback failed")
+        return current
 
     def wait_completed(self, store, fid):
         for _ in range(60):

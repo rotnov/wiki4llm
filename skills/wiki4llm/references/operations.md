@@ -19,6 +19,20 @@ collection, repository/branch and store bindings. The current protocol cannot ad
 a populated legacy store, a lost local journal or a manually imported publication.
 Adding or removing collections under existing ownership is not an in-place feature.
 
+Before bulk ingestion, inspect the Workers plan, current Durable Object SQL usage
+and [included quotas](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+File counts and HTTP request counts are not SQL-write estimates: durable state
+transitions, receipts and indexes write multiple rows per file. A shared authority
+can make quota exhaustion visible to multiple workspaces. Preserve its journal
+and resolve capacity before repeating a quota-failed run.
+
+For a partially applied attachment batch, the CLI reports found/expected counts
+and missing metadata fields without exposing values. It can restore exactly empty
+attributes on an acknowledged owned upload after source/receipt, File identity and
+chunking checks, followed by readback. Conflicting nonempty attributes and missing
+attachments remain unresolved; inspect the evidence instead of changing journal
+phases manually. See `docs/remote-state.md` for the precise recovery boundary.
+
 Run from the repository root with nonsecret `RAG_CONFIG` set to the reviewed TOML
 path and credentials injected through the documented environment variables:
 
