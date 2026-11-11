@@ -60,17 +60,14 @@ test("invitation expiry, issuer isolation and transaction rollback preserve pend
     assert.notEqual(row.token_hash, token);
     assert.equal(JSON.stringify(row).includes(token), false);
     assert.throws(() =>
-      invitations.accept(
-        token,
-        { ...identity, issuer: "https://other.cloudflareaccess.com" },
-        "https://gate.example/mcp",
-      ),
+      invitations.accept(token, {
+        ...identity,
+        issuer: "https://other.cloudflareaccess.com",
+      }),
     );
     now += 60000;
     assert.equal(invitations.status({ id: created.id }).status, "expired");
-    assert.throws(() =>
-      invitations.accept(token, identity, "https://gate.example/mcp"),
-    );
+    assert.throws(() => invitations.accept(token, identity));
     assert.equal(
       db.prepare("SELECT count(*) AS n FROM identities").get()!.n,
       0,
@@ -84,11 +81,7 @@ test("invitation expiry, issuer isolation and transaction rollback preserve pend
     state.setPrincipal("disabled", { allow: ["example"], deny: [] }, false);
     state.bind(identity.key, "disabled", true);
     assert.throws(() =>
-      invitations.accept(
-        next.url.split("/").at(-1)!,
-        identity,
-        "https://gate.example/mcp",
-      ),
+      invitations.accept(next.url.split("/").at(-1)!, identity),
     );
     assert.equal(invitations.status({ id: next.id }).status, "pending");
     assert.equal(
@@ -121,11 +114,7 @@ test("invitation expiry, issuer isolation and transaction rollback preserve pend
       identity,
     );
     assert.throws(() =>
-      invitations.accept(
-        full.url.split("/").at(-1)!,
-        identity,
-        "https://gate.example/mcp",
-      ),
+      invitations.accept(full.url.split("/").at(-1)!, identity),
     );
     assert.equal(invitations.status({ id: full.id }).status, "pending");
     assert.equal(

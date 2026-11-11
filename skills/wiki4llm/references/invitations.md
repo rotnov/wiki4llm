@@ -5,8 +5,9 @@
 The administrator supplies an email and workspace scope. Create an email-bound,
 one-time invitation link through the deployed gate, read back its state and return
 it privately. After Cloudflare browser authentication, the invitation page
-activates permissions for the signed identity and displays a ready-to-copy English
-MCP prompt. No separate acceptance button is required. Do not send mail unless the
+activates permissions for the signed identity and displays its effective workspace
+list. The administrator receives the English MCP prompt in the creation result
+and forwards it to the teammate alongside the link. No separate acceptance button is required. Do not send mail unless the
 user explicitly requests it.
 
 Read [access procedures](access.md) for administrator setup and existing permissions.
@@ -42,7 +43,7 @@ Use the returned ID in a private `{id}` JSON file and read back the exact grant:
 npm run admin:worker -- "$GATE_ORIGIN" invite-status .data/invite-id.json
 ```
 
-Return the actual link, scope and expiry. Never fabricate links or log/store tokens
+Return the actual link, connection prompt, scope and expiry. Never fabricate links or log/store tokens
 in tracked files. A lost creation response requires checking operator records;
 raw links cannot be recovered through status. Keep `pending`, `accepted`, and real
 client retrieval verified as separate outcomes.

@@ -113,7 +113,12 @@ test("invitation activation binds only its authenticated recipient and preserves
       workspaces: ["example"],
     });
     assert.equal(r.status, 200, await r.clone().text());
-    return (await r.json()) as { id: string; url: string; expiresAt: number };
+    return (await r.json()) as {
+      id: string;
+      url: string;
+      expiresAt: number;
+      prompt: string;
+    };
   }
   try {
     const manifest = readFileSync(
@@ -211,9 +216,20 @@ test("invitation activation binds only its authenticated recipient and preserves
       true,
     );
     assert.equal(
-      result.prompt,
+      invitation.prompt,
       "Connect wiki4llm MCP as a web connection: https://gate.example/mcp.\nUse person@example.org to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to example and retrieve a document.",
     );
+    assert.equal("prompt" in result, false);
+    const acceptedPage = await req(
+      path,
+      undefined,
+      "recipient",
+      "person@example.org",
+    );
+    assert.equal(acceptedPage.status, 200);
+    const acceptedHtml = await acceptedPage.text();
+    assert.match(acceptedHtml, /<li>example<\/li>/);
+    assert.doesNotMatch(acceptedHtml, /Copy prompt|Paste this prompt/);
     inventory = (await (
       await req("/admin/status?kind=identities")
     ).json()) as any;
@@ -293,6 +309,19 @@ test("invitation activation binds only its authenticated recipient and preserves
       ).status,
       403,
     );
+    const unrelatedPage = await req(
+      path,
+      undefined,
+      "other-subject",
+      "person@example.org",
+    );
+    assert.doesNotMatch(await unrelatedPage.text(), /<li>example<\/li>/);
+    await req("/admin/unbind", { key: "user:recipient" });
+    assert.equal(
+      (await req(path, undefined, "recipient", "person@example.org")).status,
+      401,
+    );
+    assert.equal((await rpc("list_workspaces")).isError, true);
   } finally {
     await mf.dispose();
   }
@@ -402,10 +431,7 @@ test("reader realm invitations bind the reader subject, never the bridge or prim
       body: "{}",
     });
     assert.equal(result.status, 200, await result.clone().text());
-    assert.match(
-      ((await result.json()) as any).prompt,
-      /https:\/\/reader.example\/mcp/,
-    );
+    assert.match(invite.prompt, /https:\/\/reader.example\/mcp/);
     const identities = await mf.dispatchFetch(
       origin +
         "/admin/status?kind=identities&issuer=" +
