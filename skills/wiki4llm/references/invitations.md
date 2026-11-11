@@ -7,7 +7,7 @@ one-time invitation link through the deployed gate, read back its state and retu
 it privately. After Cloudflare browser authentication, the invitation page
 activates permissions for the signed identity and displays its effective workspace
 list. The administrator receives the English MCP prompt in the creation result
-and forwards it to the teammate alongside the link. No separate acceptance button is required. Do not send mail unless the
+and forwards it to the teammate as a single block containing the invitation link. No separate acceptance button is required. Do not send mail unless the
 user explicitly requests it.
 
 Read [access procedures](access.md) for administrator setup and existing permissions.
@@ -46,7 +46,7 @@ Use the returned ID in a private `{id}` JSON file and read back the exact grant:
 npm run admin:worker -- "$GATE_ORIGIN" invite-status .data/invite-id.json
 ```
 
-Return the actual link, connection prompt, scope and expiry. Never fabricate links or log/store tokens
+Return the complete generated prompt with the actual invitation link inside it, plus scope and expiry. Never fabricate links or log/store tokens
 in tracked files. A lost creation response requires checking operator records;
 raw links cannot be recovered through status. Keep `pending`, `accepted`, and real
 client retrieval verified as separate outcomes.
@@ -78,21 +78,32 @@ clone or OpenAI/Cloudflare management keys.
 ## Prepare the recipient invitation
 
 Use this single English template for both Claude and Codex. Substitute a verified
-HTTPS reader MCP URL, recipient email and expected workspace list. Never guess a
+invitation URL returned by the gate, HTTPS reader MCP URL, recipient email and
+workspace scope. Keep the invitation URL inside the prompt so forwarding only the
+code block does not omit activation. Never guess a
 hostname or use the administration origin. If values are missing, label the prompt
 as a draft and retain the uppercase placeholders. Do not include operator secrets.
 The email is for wiki4llm authentication, not necessarily the AI client's account.
 
 ```text
-Use computer use to add wiki4llm as a web connector through the application UI: {MCP_URL}.
-Do not configure it through local config files or CLI commands.
-Use {EMAIL} to sign in; I will complete the browser authentication myself.
-After connecting, verify access to {WORKSPACES} and retrieve a document.
+First, open this wiki4llm invitation:
+{INVITATION_URL}
+
+I will sign in as {EMAIL}. Wait until the page shows "Access granted".
+
+Then use computer use to add wiki4llm as a web connector through the application UI:
+{MCP_URL}
+
+Do not use local config files or CLI commands. If prompted, I will authenticate again with the same email.
+
+Finally, verify access to {WORKSPACES} and retrieve a document.
 ```
 
 ## Agent connection procedure
 
-Determine the actual client surface and use [access procedures](access.md).
+First open the invitation and wait for **Access granted**. OAuth sign-in to the
+MCP connector alone does not activate an invitation or assign reader permissions.
+Then determine the client surface and use [access procedures](access.md).
 For this invitation flow, use computer use to add a hosted web connector in the
 application UI. Do not substitute local MCP configuration or CLI registration.
 If computer use or web connectors are unavailable in the chosen client, explain
