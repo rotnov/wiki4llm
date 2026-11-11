@@ -494,18 +494,24 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     assert preview["collections"]["docs0"]["skipped_files"] >= 1
     assert provider.uploads == 0
     first = run("sync")
+    assert first["mode"] == "submitted" and "publication_id" not in first
+    assert authority.manifest is None
+    authority.complete(provider)
     assert "nested/readme.md" in authority.manifest["collections"]["docs0"]["files"]
     second = run("sync")
-    assert first["publication_id"] == second["publication_id"]
+    assert first["job_id"] == second["publication_id"]
     assert provider.uploads == 1 and provider.closes == 2
     (source / "nested/readme.md").unlink()
     git(source, "add", "--", "nested/readme.md")
     git(source, "commit", "-m", "Remove selected synthetic document")
     deleted = run("sync")
     assert deleted["collections"]["docs0"]["changes"]["delete"] == 1
+    assert deleted["mode"] == "submitted"
+    authority.complete(provider)
     assert authority.manifest["collections"]["docs0"]["files"] == {}
+    run("sync")
     assert provider.files == {} and "file-1" in provider.deleted
-    assert provider.closes == 3
+    assert provider.closes == 4
     assert all(c.client.is_closed for c in clients)
     assert not authority.held
 
@@ -517,7 +523,7 @@ def test_workflow_output_is_nonsecret_and_plan_publication_is_empty(tmp_path, mo
         gha(), "execute", lambda *a, **kw: {"workspace": "team-docs", "mode": "preview"}
     )
     assert gha().main(["--mode", "plan"]) == 0
-    assert output.read_text() == "workspace=team-docs\npublication-id=\n"
+    assert output.read_text() == "workspace=team-docs\npublication-id=\njob-id=\nmode=preview\n"
     assert json.loads(capsys.readouterr().out)["workspace"] == "team-docs"
 
 

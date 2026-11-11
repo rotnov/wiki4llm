@@ -59,7 +59,8 @@ execution, pin workflow and tool checkout to the same reviewed SHA; do not silen
 change an operator's chosen contract.
 
 The caller template is manual-only and defaults to `plan`. Run approved `sync`,
-then repeat sync at the same source revisions/configuration and check MCP before
+record the submitted job ID and check `status --summary` for background completion.
+CI returns after submission; it never waits for OpenAI indexing. Then repeat sync at the same source revisions/configuration and check MCP before
 enabling an authorized push trigger. Automatic pushes must be from the default branch; manual branch dispatch must
 be allowed by the selected GitHub environment. PR/tag contexts are rejected. The
 dispatched workflow branch and each collection's configured source branch are

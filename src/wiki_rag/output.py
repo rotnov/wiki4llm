@@ -5,9 +5,15 @@ def summarize(result):
     """Keep configured labels, revisions and counts; never copy path/error records."""
     summary = {
         name: result[name]
-        for name in ("mode", "workspace", "publication_id", "network_requests")
+        for name in ("mode", "workspace", "publication_id", "job_id", "network_requests")
         if name in result
     }
+    if "job" in result:
+        summary["job"] = {
+            k: v
+            for k, v in result["job"].items()
+            if k in {"id", "status", "total", "completed", "error", "publication_id"}
+        }
     summary["collections"] = {}
     for name, collection in result.get("collections", {}).items():
         changes = collection["changes"]

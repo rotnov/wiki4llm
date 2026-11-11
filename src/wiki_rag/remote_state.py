@@ -126,7 +126,7 @@ class RemoteState:
     def request(self, method, route, body=None, *, limit=SMALL_LIMIT, raw=False, params=None):
         data = encode(body) if body is not None else None
         if data is not None and len(data) > (
-            17 * 1024 * 1024 if route == "publish" else SMALL_LIMIT
+            17 * 1024 * 1024 if route in {"publish", "submit"} else SMALL_LIMIT
         ):
             raise AuthorityError("authority request exceeds protocol size bound")
         # Fixed logical body is retained across ambiguous transport retries.
@@ -251,6 +251,28 @@ class RemoteState:
         number(result.get("revision"))
         if type(result.get("initialized")) is not bool:
             raise AuthorityError("invalid authority initialization state")
+        job = result.get("job")
+        if job is not None:
+            if (
+                not isinstance(job, dict)
+                or job.get("status")
+                not in {"pending", "complete", "failed", "superseded", "revoked"}
+                or not isinstance(job.get("id"), str)
+                or not re.fullmatch(r"[0-9a-f-]{36}", job["id"])
+                or number(job.get("total")) > 10000
+                or number(job.get("completed")) > job["total"]
+            ):
+                raise AuthorityError("invalid authority job status")
+            if "error" in job and (
+                not isinstance(job["error"], str)
+                or not re.fullmatch(r"[a-z0-9_-]{1,80}", job["error"])
+            ):
+                raise AuthorityError("invalid authority job error")
+            if "publication_id" in job and (
+                not isinstance(job["publication_id"], str)
+                or not re.fullmatch(r"[0-9a-f-]{36}", job["publication_id"])
+            ):
+                raise AuthorityError("invalid authority job publication")
         return result
 
     def load(self):
@@ -337,12 +359,36 @@ class RemoteState:
             raise
 
     def checkpoint(self, oid, operation, retired_id=None):
-        if len(encode(operation)) > 8192:
-            raise AuthorityError("operation exceeds protocol size bound")
-        fields = {"upserts": [{"id": oid, "operation": operation}]}
-        if retired_id:
-            fields["retire"] = [{"id": oid, "retired_id": retired_id}]
-        return self.command("checkpoint", **fields)
+        retired = [{"id": oid, "retired_id": retired_id}] if retired_id else []
+        return self.checkpoint_many([{"id": oid, "operation": operation}], retired)
+
+    def checkpoint_many(self, upserts, retire=()):
+        """Keep every phase transition, using count- and byte-bounded deltas."""
+        retired = {item["id"]: item for item in retire}
+        chunks, batch = [], []
+        for item in upserts:
+            if len(encode(item["operation"])) > 8192:
+                raise AuthorityError("operation exceeds protocol size bound")
+            candidate = batch + [item]
+            fields = {
+                "upserts": candidate,
+                "retire": [retired[i["id"]] for i in candidate if i["id"] in retired],
+            }
+            if len(candidate) > 100 or len(encode(fields)) > SMALL_LIMIT - 1024:
+                chunks.append(batch)
+                batch = [item]
+            else:
+                batch = candidate
+        if batch:
+            chunks.append(batch)
+        result = None
+        for batch in chunks:
+            fields = {"upserts": batch}
+            entries = [retired[i["id"]] for i in batch if i["id"] in retired]
+            if entries:
+                fields["retire"] = entries
+            result = self.command("checkpoint", **fields)
+        return result
 
     def operations(self, **fields):
         self.guard()

@@ -78,3 +78,17 @@ def test_local_cli_full_preview_remains_available(monkeypatch, capsys):
     monkeypatch.setattr(cli, "run", lambda *a, **kw: raw)
     assert cli.main(["plan"]) == 0
     assert json.loads(capsys.readouterr().out) == raw
+
+
+def test_github_submission_outputs_pending_job_without_publication(monkeypatch, capsys, tmp_path):
+    raw = result("submitted")
+    job = raw.pop("publication_id")
+    raw["job_id"] = job
+    monkeypatch.setattr(github_actions, "execute", lambda *a, **kw: raw)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert github_actions.main(["--mode", "sync"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["job_id"] == job and "publication_id" not in summary
+    assert f"job-id={job}\nmode=submitted\n" in output.read_text()
+    assert "publication-id=\n" in output.read_text()

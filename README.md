@@ -54,9 +54,13 @@ state. JSON output reports selection counts/bytes, additions, replacements,
 deletions, skipped files and reasons. Exit code 2 means the operation failed;
 interruption returns 130. In local mode, cleanup failures after a successful
 publication are reported as `cleanup_pending` in otherwise successful JSON output.
-Remote-mode cleanup failures exit with code 2 and report the committed publication ID.
+Remote sync returns `mode: submitted` with a `job_id` after uploading and attaching;
+the gate completes indexing and publication in the background. A successful submission
+is not a completed index. Inspect `status --summary` for job progress. No-op syncs
+return `mode: applied` with the existing publication ID. Remote cleanup runs before
+submission and failures exit with code 2 while preserving the active publication.
 
-Use `--summary` with `plan`, `index` or `update` for aggregate log output without
+Use `--summary` with `plan`, `index`, `update` or `status` for aggregate log output without
 document or excluded-file paths. The GitHub Actions entry points use this boundary
 automatically; ordinary local CLI output remains detailed. Summaries retain
 configured workspace/collection labels, revisions and counts.
@@ -180,7 +184,10 @@ state directory. Restore the original configuration/state or create fresh empty
 stores with new state. Moving a local repository root is allowed. Adding/removing
 collections under existing state is deliberately outside this MVP.
 
-New and changed files are uploaded once, attached, and polled until `completed`.
+Local-state ingestion uploads and attaches files serially, then polls until `completed`.
+Remote ingestion uploads with eight workers, batches attachments and submits the
+rescanned snapshot to the gate. CI never waits or polls for indexing; the gate
+verifies completion and publishes in the background.
 All configured collections publish together only after every selected file
 succeeds and a second source scan matches the captured selection. The previous
 manifest survives prepublication failure. Updates at identical source revisions,

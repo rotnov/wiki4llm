@@ -16,7 +16,7 @@ def main(argv=None):
     for name in ("plan", "index", "update", "status"):
         child = commands.add_parser(name)
         child.add_argument("--config", default=argparse.SUPPRESS, help="TOML config path")
-        if name in {"plan", "index", "update"}:
+        if name in {"plan", "index", "update", "status"}:
             child.add_argument(
                 "--summary", action="store_true", help="print counts without source-file paths"
             )

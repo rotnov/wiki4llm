@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime, timezone
 
 from .config import RagError
-from .engine import checkpoint, empty_manifest, guard_commits, plan, retire, stage_file
+from .engine import checkpoint, empty_manifest, guard_commits, plan, retire
 from .provider import OpenAIProvider
+from .remote_batch import operation_id, stage_files
 from .remote_state import MANIFEST_LIMIT, AuthorityError, RemoteState, encode
 from .selection import scan
 
@@ -65,12 +66,14 @@ def prospective_bounds(cfg, snapshots):
         raise RagError("prospective remote manifest exceeds safe size budget")
 
 
-def cleanup_remote(cfg, state, provider):
+def cleanup_remote(cfg, state, provider, keep=()):
     remote = state["_remote"]
     unresolved = 0
     for page in remote.cleanup_pages():
         for item in page:
             oid, op = item["id"], item["operation"]
+            if oid in keep:
+                continue
             if op["phase"] == "upload_ready":
                 # No external intent was dispatched. Keep ownership; protocol v1
                 # has no tombstone transition for an unuploaded ready operation.
@@ -111,12 +114,16 @@ def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
                     "initialized": status["initialized"],
                     "manifest": manifest,
                     "operation_count": status["operation_count"],
+                    **({"job": status["job"]} if status.get("job") else {}),
                 }
             result = plan(cfg, scan(cfg), manifest)
             result["network_requests"] = remote.network_requests
             return result
         remote.acquire()
         status = remote.load()
+        features = status.get("features", [])
+        if not isinstance(features, list) or "async-submit-v1" not in features:
+            raise RagError("remote authority requires async-submit-v1 before uploading")
         if command == "update" and not status["initialized"]:
             raise RagError("remote authority uninitialized; use index with fresh empty stores")
         before = remote.publication() or empty_manifest(cfg)
@@ -135,23 +142,29 @@ def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
             remote.command("initialize")
         state = {"_remote": remote, "operations": OperationLookup(remote)}
         result = plan(cfg, snapshots, before)
+        selected = []
+        keep = set()
+        for collection in cfg.collections:
+            previous = before["collections"].get(collection.name, {}).get("files", {})
+            for path, file in snapshots[collection.name].files.items():
+                keep.add(operation_id(cfg, collection, file))
+                if path not in previous or previous[path]["version"] != file.version:
+                    selected.append((collection, file))
+        staged = stage_files(cfg, state, selected, provider)
         collections = {}
         for collection in cfg.collections:
             snap = snapshots[collection.name]
-            previous = before["collections"].get(collection.name, {})
-            entries = {}
-            for path, file in snap.files.items():
-                old = previous.get("files", {}).get(path)
-                if old and old["version"] == file.version:
-                    entries[path] = old  # Server-certified complete ownership remains active.
-                else:
-                    entries[path] = stage_file(cfg, state, collection, snap, file, provider)
+            previous = before["collections"].get(collection.name, {}).get("files", {})
+            entries = {
+                path: staged.get((collection.name, path), previous.get(path)) for path in snap.files
+            }
             collections[collection.name] = {
                 **collection.binding(),
                 "repository_commit": snap.commit,
                 "processing": cfg.processing,
                 "files": entries,
             }
+        cleanup_remote(cfg, state, provider, keep)
         rescanned = scan(cfg)
         if any(rescanned[name].fingerprint != snap.fingerprint for name, snap in snapshots.items()):
             raise RagError("source changed during ingestion; publication aborted")
@@ -168,11 +181,20 @@ def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
         manifest_text = encode(manifest)
         if len(manifest_text) > MANIFEST_LIMIT:
             raise RagError("remote manifest exceeds protocol size bound")
-        remote.command("publish", manifestText=manifest_text.decode())
-        published = manifest["publication_id"]
-        cleanup_remote(cfg, state, provider)
+        if collections == before["collections"]:
+            result.update(
+                mode="applied", publication_id=before["publication_id"], unresolved_operations=[]
+            )
+        else:
+            submitted = remote.command("submit", manifestText=manifest_text.decode())
+            job_id = submitted.get("job_id")
+            try:
+                if str(uuid.UUID(job_id)) != job_id:
+                    raise ValueError()
+            except ValueError, TypeError, AttributeError:
+                raise AuthorityError("invalid authority submission receipt") from None
+            result.update(mode="submitted", job_id=job_id, unresolved_operations=[])
         remote.guard()
-        result.update(mode="applied", publication_id=published, unresolved_operations=[])
         result.pop("network_requests")
         return result
     except RagError as exc:

@@ -104,6 +104,7 @@ class Authority:
         self.initialized = False
         self.ops = {}
         self.manifest = None
+        self.pending = None
         self.epoch = 0
         self.held = False
         self.requests = []
@@ -113,6 +114,7 @@ class Authority:
 
     def metadata(self):
         return {
+            "features": ["async-submit-v1"],
             "workspace": "team-docs",
             "revision": self.revision,
             "initialized": self.initialized,
@@ -206,6 +208,8 @@ class Authority:
                 self.ops[item["id"]] = item["operation"]
         elif path == "publish":
             self.manifest = json.loads(body["manifestText"])
+        elif path == "submit":
+            self.pending = json.loads(body["manifestText"])
         else:
             raise AssertionError(path)
         self.revision += 1
@@ -214,11 +218,26 @@ class Authority:
             "initialized": self.initialized,
             "generation": "o-" + "a" * 64,
         }
+        if path == "submit":
+            result["job_id"] = self.pending["publication_id"]
         self.receipts[rid] = result
         if self.lose == path:
             self.lose = None
             raise httpx.ReadError("synthetic lost response")
         return httpx.Response(200, json=result)
+
+    def complete(self, provider):
+        """Explicit test-server completion event, separate from client execution."""
+        assert self.pending is not None
+        for collection in self.pending["collections"].values():
+            for entry in collection["files"].values():
+                op = self.ops[entry["operation_id"]]
+                assert op["phase"] in {"attached", "complete"}
+                assert provider.attachments[op["store"], op["file_id"]]["status"] == "completed"
+                op["phase"] = "complete"
+        self.manifest = self.pending
+        self.pending = None
+        self.revision += 1
 
 
 def backend(cfg, authority, monkeypatch, **kwargs):
@@ -270,7 +289,10 @@ def test_remote_engine_ephemeral_noop_changes_and_pending_recovery(tmp_path, rep
 
     def invoke(command="index", apply=True):
         with backend(cfg, authority, monkeypatch) as remote:
-            return run(cfg, command, apply=apply, provider=provider, remote=remote)
+            result = run(cfg, command, apply=apply, provider=provider, remote=remote)
+        if result["mode"] == "submitted":
+            authority.complete(provider)
+        return result
 
     provider.unknown_upload = True
     with pytest.raises(RagError, match="unknown"):
@@ -284,20 +306,23 @@ def test_remote_engine_ephemeral_noop_changes_and_pending_recovery(tmp_path, rep
     assert not (tmp_path / ".state").exists()
     tracked(repo, "a.md", "second")
     git(repo, "commit", "-m", "second")
-    authority.lose = "publish"
+    authority.lose = "submit"
+    invoke()
     invoke()
     assert provider.uploads == 2 and set(provider.files) == {"file-2"}
     git(repo, "mv", "a.md", "renamed.md")
     git(repo, "commit", "-m", "rename")
     invoke()
+    invoke()
     assert provider.uploads == 3 and set(provider.files) == {"file-3"}
     git(repo, "rm", "renamed.md")
     git(repo, "commit", "-m", "delete")
     invoke()
+    invoke()
     assert not provider.files
 
 
-def test_remote_conflict_after_publication_is_fatal(tmp_path, repo, monkeypatch):
+def test_remote_submission_conflict_preserves_previous_publication(tmp_path, repo, monkeypatch):
     from test_engine import FakeProvider
 
     from wiki_rag.engine import run
@@ -305,25 +330,18 @@ def test_remote_conflict_after_publication_is_fatal(tmp_path, repo, monkeypatch)
     tracked(repo, "a.md")
     git(repo, "commit", "-m", "first")
     cfg = remote_config(tmp_path, repo)
-    authority = Authority(cfg)
-    provider = FakeProvider()
+    authority, provider = Authority(cfg), FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
+    authority.complete(provider)
+    before = authority.manifest
     tracked(repo, "a.md", "second")
     git(repo, "commit", "-m", "second")
-    original = authority.handle
-
-    def handle(request):
-        response = original(request)
-        if request.url.path.endswith("/publish"):
-            authority.fail = "checkpoint"
-        return response
-
-    authority.handle = handle
+    authority.fail = "submit"
     with pytest.raises(RagError, match="lease"), backend(cfg, authority, monkeypatch) as remote:
-        with pytest.raises(RagError, match="publication committed"):
+        with pytest.raises(RagError, match="409"):
             run(cfg, "index", apply=True, provider=provider, remote=remote)
-    assert provider.deleted == []
+    assert authority.manifest == before and provider.deleted == []
 
 
 @pytest.mark.parametrize(
@@ -391,8 +409,10 @@ def test_preview_holding_lease_and_generation_restart(tmp_path, repo, monkeypatc
     git(repo, "commit", "-m", "first")
     cfg = remote_config(tmp_path, repo)
     authority = Authority(cfg)
+    provider = FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
-        run(cfg, "index", apply=True, provider=FakeProvider(), remote=remote)
+        run(cfg, "index", apply=True, provider=provider, remote=remote)
+    authority.complete(provider)
     original = authority.handle
     changed = [False]
 
@@ -456,6 +476,7 @@ def test_shallow_and_stale_sources_before_provider_writes(tmp_path, repo, monkey
     authority, provider = Authority(cfg), FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
+    authority.complete(provider)
     git(repo, "reset", "--hard", old)
     with backend(cfg, authority, monkeypatch) as remote:
         with pytest.raises(RagError, match="stale"):
@@ -466,9 +487,7 @@ def test_shallow_and_stale_sources_before_provider_writes(tmp_path, repo, monkey
         scan(cfg)
 
 
-def test_obsolete_unknown_upload_fails_explicitly_after_new_publication(
-    tmp_path, repo, monkeypatch
-):
+def test_obsolete_unknown_upload_fails_before_submission(tmp_path, repo, monkeypatch):
     from test_engine import FakeProvider
 
     from wiki_rag.engine import run
@@ -486,7 +505,7 @@ def test_obsolete_unknown_upload_fails_explicitly_after_new_publication(
     tracked(repo, "a.md", "second")
     git(repo, "commit", "-m", "second")
     with backend(cfg, authority, monkeypatch) as remote:
-        with pytest.raises(RagError, match="publication committed.*unresolved"):
+        with pytest.raises(RagError, match="unresolved"):
             run(cfg, "index", apply=True, provider=provider, remote=remote)
     assert any(op["phase"] == "upload_pending" for op in authority.ops.values())
     assert provider.uploads == 1
@@ -512,7 +531,9 @@ def test_preflight_accepts_gate_sized_ten_thousand_small_entries(tmp_path, repo)
     prospective_bounds(cfg, {"guide": Snapshot(files, [], "c" * 40)})
 
 
-def test_publish_acknowledged_then_lease_poison_reports_commit(tmp_path, repo, monkeypatch):
+def test_submission_acknowledged_then_lease_poison_never_claims_publication(
+    tmp_path, repo, monkeypatch
+):
     from test_engine import FakeProvider
 
     from wiki_rag.engine import run
@@ -526,16 +547,16 @@ def test_publish_acknowledged_then_lease_poison_reports_commit(tmp_path, repo, m
 
     def handle(request):
         result = original(request)
-        if request.url.path.endswith("/publish"):
+        if request.url.path.endswith("/submit"):
             holder[0].poison()
         return result
 
     authority.handle = handle
     with pytest.raises(RagError, match="lease"), backend(cfg, authority, monkeypatch) as remote:
         holder.append(remote)
-        with pytest.raises(RagError, match="publication committed"):
+        with pytest.raises(RagError, match="lease"):
             run(cfg, "index", apply=True, provider=FakeProvider(), remote=remote)
-    assert authority.manifest is not None
+    assert authority.manifest is None and authority.pending is not None
 
 
 def test_remote_config_missing_mode_and_wait_bounds(tmp_path, repo):
@@ -722,6 +743,7 @@ def test_remote_uncommitted_substitution_cannot_publish_deletion(
     authority, provider = Authority(cfg), FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
+    authority.complete(provider)
     before = json.loads(json.dumps(authority.manifest))
     revision = authority.revision
     substitute_source(repo, tmp_path, substitution)
@@ -780,6 +802,7 @@ def test_remote_rescan_rejects_substitution_after_new_upload(
     authority, provider = Authority(cfg), FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
+    authority.complete(provider)
     before = json.loads(json.dumps(authority.manifest))
     tracked(repo, "b.md", "new committed bytes")
     git(repo, "commit", "-m", "update second file")

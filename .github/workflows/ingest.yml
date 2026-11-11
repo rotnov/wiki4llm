@@ -94,6 +94,10 @@ on:
         value: ${{ jobs.ingest.outputs.workspace }}
       publication-id:
         value: ${{ jobs.ingest.outputs.publication-id }}
+      job-id:
+        value: ${{ jobs.ingest.outputs.job-id }}
+      mode:
+        value: ${{ jobs.ingest.outputs.mode }}
 
 permissions:
   contents: read
@@ -113,6 +117,8 @@ jobs:
     outputs:
       workspace: ${{ steps.ingest.outputs.workspace }}
       publication-id: ${{ steps.ingest.outputs.publication-id }}
+      job-id: ${{ steps.ingest.outputs.job-id }}
+      mode: ${{ steps.ingest.outputs.mode }}
     steps:
       - name: Validate workflow inputs
         env:

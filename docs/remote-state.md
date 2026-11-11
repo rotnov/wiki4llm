@@ -8,7 +8,8 @@ exactly one of `state` or `[remote_state]`.
 
 The exact server contract is the [ingestion protocol](../gate/docs/ingestion-state-protocol.md).
 The client and gate are versioned together here. Deploy and provision the gate
-using the [deployment guide](deployment.md).
+using the [deployment guide](deployment.md). The gate must advertise
+`async-submit-v1`; a remote sync refuses older gates before provider writes.
 
 ## Fresh authority setup
 
@@ -30,6 +31,7 @@ bodies are stored in the journal.
 uv run wiki-rag --config wiki-rag.remote.toml plan
 uv run wiki-rag --config wiki-rag.remote.toml index --apply
 uv run wiki-rag --config wiki-rag.remote.toml update --apply
+uv run wiki-rag --config wiki-rag.remote.toml status --summary
 ```
 
 `index --apply` always acquires the lease before deciding whether to initialize or
@@ -40,6 +42,28 @@ between commands using a pre-lock status check. Plan/status and commands without
 lease and make no provider requests. Local previews remain offline. Publication
 chunks pin one generation and verify total bytes and SHA-256 before use; preview
 retries a changed generation at most twice.
+
+## Asynchronous submission
+
+The CLI uploads at most eight files concurrently and submits attachments in batches
+of at most 2000 per store, preserving each file's attributes and chunking. Only the
+active upload window receives durable upload intents. Journal mutations stay on the
+coordinator thread, and all dispatched workers drain before clients close. On an
+ordinary upload failure, successful sibling receipts are persisted; authority loss
+prevents further journal writes and leaves dispatched outcomes for reconciliation.
+
+After attachment submission and a matching rescan, `submit` durably captures the
+exact manifest. The CLI returns `mode: submitted` and `job_id`, without waiting for
+OpenAI indexing. A Durable Object alarm verifies readiness and atomically publishes
+all collections. `status --summary` exposes pending/complete/failed/superseded/revoked
+job progress without manifest contents. A failed job leaves the prior publication
+active; a new writer lease supersedes an older pending job. No-op sync after completion
+returns `mode: applied` and the existing publication ID, with no new job.
+
+The gate's read credential only checks readiness; it never uploads, attaches or
+performs cleanup. The next publisher sync cleans obsolete owned resources before
+submission, retaining all operation IDs selected for the current snapshot. No journal
+mutations follow submission, because that revision fences background publication.
 
 ## Source policy
 
@@ -63,7 +87,7 @@ excluded by the existing selector. The local backend still supports dirty workin
 files and reports null committed provenance for their changed bytes.
 
 Hash-based file selection remains authoritative. The source is rescanned before
-publication. Unchanged active entries reuse server-certified ownership and file
+submission. Unchanged active entries reuse server-certified ownership and file
 IDs; content changes, renames and deletions converge only through a new publication.
 
 ## Failure and concurrency behavior
@@ -78,9 +102,8 @@ There is no in-place reacquisition after lease or revision loss.
 Initial contention waits with jitter and Retry-After for at most
 `lease_wait_seconds` (default 300, configurable 0–1800). Timeout and stale-source
 errors require an explicit fresh rerun/recheckout. Commands retry ambiguous
-transport failures with the same UUID and body. Checkpoint/publication CAS failures
-are fatal. Cleanup failures are fatal even after publication; the CLI reports the
-committed publication ID separately and requires another attempt.
+transport failures with the same UUID and body. Checkpoint/submission CAS failures
+are fatal. Cleanup failures stop submission; the previous publication remains active.
 
 OpenAI is outside the Durable Object transaction. Already-dispatched effects may
 finish after lease expiry. Unique upload filenames/content hashes and attachment
@@ -100,13 +123,14 @@ Publisher credentials also hold project-scoped ingestion permissions; trusted
 protected-branch code and restricted credentials are required. This is not an
 end-to-end exactly-once provider guarantee or remote cancellation mechanism.
 
-Operation reads use lookup batches of at most 50 IDs (staging needs one at a time),
+Operation reads use lookup batches of at most 50 selected IDs,
 cleanup pages of at most 100 records/512 KiB, and a strictly progressing keyset
 cursor. No full history dictionary or growing history cache is reconstructed.
-Checkpoints send explicit deltas, not complete journal snapshots. Limits are
+Checkpoints send explicit deltas of at most 100 operations and 512 KiB per request,
+not complete journal snapshots. Every operation phase remains a separate transition. Limits are
 8 KiB/operation, 100,000 operations including tombstones, 20 collections,
 10,000 active files, 8 MiB manifest, 9 MiB publication snapshot, 900 KiB/chunk,
-and 17 MiB publish wrapper. Prospective manifest admission reserves the maximum
+and 17 MiB publication/submission wrapper. Prospective manifest admission reserves the maximum
 provider file-ID length before uploads. The server rejects operation quota before
 a new intent can dispatch. Maintenance beyond 100,000 records needs an explicit
 future administrative workflow; history is never silently truncated.

@@ -64,6 +64,16 @@ class FakeProvider:
             self.unknown_attach = False
             raise RagError("unknown attachment outcome")
 
+    def attach_batch(self, store, items, chunking):
+        for item in items:
+            self.attach(store, item["file_id"], item["attributes"], chunking)
+        return {"id": "vsfb_test", "status": "in_progress"}
+
+    def attachments_by_id(self, store, ids):
+        return {
+            fid: self.attachments[store, fid] for fid in ids if (store, fid) in self.attachments
+        }
+
     def attachment(self, store, fid):
         return self.attachments.get((store, fid))
 

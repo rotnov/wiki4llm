@@ -15,7 +15,7 @@ Other symbolic tool refs are rejected. No release tag is required.
 
 The caller template has only `workflow_dispatch`, with a `mode` selector defaulting
 to `plan` and an explicit mapping to the reusable workflow. Copying it does not
-enable push ingestion. Qualify manual plan, authorized sync, repeat sync at the same
+enable push ingestion. Qualify manual plan, authorized sync, background completion, then repeat sync at the same
 source revisions/configuration, and real MCP retrieval first. For approved automatic
 updates, add `push.branches` for the consumer's actual default branch alongside
 `workflow_dispatch`; the existing mode expression selects `sync` for pushes.
@@ -26,28 +26,28 @@ The reusable workflow's own default remains `sync` for callers that omit `mode`.
 All nonsecret configuration can be supplied in the caller job's `with:` block;
 no TOML file or configuration checkout is needed in that mode.
 
-| Input                   | Default              | Meaning                                                               |
-| ----------------------- | -------------------- | --------------------------------------------------------------------- |
-| `workspace`             | Empty                | Workspace slug; selects direct configuration with the next two inputs |
-| `project-id`            | Empty                | OpenAI project identifier                                             |
-| `collections`           | Empty                | JSON array of collection objects                                      |
-| `max-files`             | 10000                | Maximum selected files, across all collections                        |
-| `max-file-bytes`        | 2000000              | Maximum size of one selected file                                     |
-| `max-total-bytes`       | 50000000             | Maximum total selected bytes                                          |
-| `unlimited-files`       | `false`              | Disable only the direct-input file-count selection budget             |
-| `unlimited-file-bytes`  | `false`              | Disable only the direct-input per-file byte selection budget          |
-| `unlimited-total-bytes` | `false`              | Disable only the direct-input total-byte selection budget             |
-| `chunk-size`            | 800                  | Chunk size in tokens                                                  |
-| `chunk-overlap`         | 400                  | Overlap in tokens, at most half the chunk size                        |
-| `gate-origin`           | Required             | Exact HTTPS origin without a path or trailing slash                   |
-| `mode`                  | `sync`               | `sync` publishes incrementally; `plan` reads without provider writes  |
-| `lease-wait-seconds`    | 300                  | Lease wait, integer from 0 to 1800                                    |
-| `environment`           | `wiki-rag-publisher` | GitHub deployment environment                                         |
-| `tool-repository`       | `rotnov/wiki4llm`    | Tool repository                                                       |
-| `tool-ref`              | `main`               | Follow upstream, or supply a full commit SHA                          |
-| `config`                | Empty                | Optional committed TOML path, instead of direct configuration         |
-| `config-repository`     | Caller               | Optional separate repository for TOML configuration                   |
-| `config-ref`            | Triggering SHA       | Required when using another config repository                         |
+| Input                   | Default              | Meaning                                                                   |
+| ----------------------- | -------------------- | ------------------------------------------------------------------------- |
+| `workspace`             | Empty                | Workspace slug; selects direct configuration with the next two inputs     |
+| `project-id`            | Empty                | OpenAI project identifier                                                 |
+| `collections`           | Empty                | JSON array of collection objects                                          |
+| `max-files`             | 10000                | Maximum selected files, across all collections                            |
+| `max-file-bytes`        | 2000000              | Maximum size of one selected file                                         |
+| `max-total-bytes`       | 50000000             | Maximum total selected bytes                                              |
+| `unlimited-files`       | `false`              | Disable only the direct-input file-count selection budget                 |
+| `unlimited-file-bytes`  | `false`              | Disable only the direct-input per-file byte selection budget              |
+| `unlimited-total-bytes` | `false`              | Disable only the direct-input total-byte selection budget                 |
+| `chunk-size`            | 800                  | Chunk size in tokens                                                      |
+| `chunk-overlap`         | 400                  | Overlap in tokens, at most half the chunk size                            |
+| `gate-origin`           | Required             | Exact HTTPS origin without a path or trailing slash                       |
+| `mode`                  | `sync`               | `sync` submits incremental indexing; `plan` reads without provider writes |
+| `lease-wait-seconds`    | 300                  | Lease wait, integer from 0 to 1800                                        |
+| `environment`           | `wiki-rag-publisher` | GitHub deployment environment                                             |
+| `tool-repository`       | `rotnov/wiki4llm`    | Tool repository                                                           |
+| `tool-ref`              | `main`               | Follow upstream, or supply a full commit SHA                              |
+| `config`                | Empty                | Optional committed TOML path, instead of direct configuration             |
+| `config-repository`     | Caller               | Optional separate repository for TOML configuration                       |
+| `config-ref`            | Triggering SHA       | Required when using another config repository                             |
 
 Each collection has `name`, `repository`, `branch`, `vector_store_id` and `include`,
 plus optional `exclude` and `extensions`. Omit `extensions` to select supported
@@ -158,7 +158,17 @@ Cleanup/release failures remain fatal, including after a committed publication.
 Workflow outputs:
 
 - `workspace`: selected workspace slug.
-- `publication-id`: committed publication UUID for sync, empty for plan.
+- `publication-id`: existing publication UUID for an applied no-op; empty for submission/plan.
+- `job-id`: durable background job UUID for a submitted sync; otherwise empty.
+- `mode`: `preview`, `submitted` or `applied`.
+
+Sync returns after bounded concurrent uploads, attachment batches and durable gate
+submission. It never polls OpenAI or keeps a CI runner alive waiting for indexing.
+A successful workflow proves submission only. Use `wiki-rag status --summary` with
+the publisher configuration to verify background completion, then check MCP and
+repeat sync at identical source revisions to verify a stable publication. Failed or
+superseded jobs preserve the previous publication. Deploy the gate with
+`async-submit-v1` support before updating callers to this tool revision.
 
 Job logs contain aggregate counts, configured workspace/collection labels and Git
 revisions. Changed and excluded file paths, skip details and operation identifiers

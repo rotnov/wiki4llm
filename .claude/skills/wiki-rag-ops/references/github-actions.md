@@ -111,8 +111,10 @@ If GitHub has not registered a new workflow for dispatch, inspect its visibility
 and registration before retrying; do not silently merge or create another repository.
 
 After a successful plan and explicit authorization to publish, dispatch `mode=sync`
-against the same reviewed
-configuration, wait for completion, and record the publication ID. Repeat sync on
+against the same reviewed configuration. Record the submitted job ID; workflow
+success means durable submission, not completed indexing. Check publisher
+`status --summary` for background completion and its publication ID; no CI job
+should wait or poll OpenAI. Repeat sync after completion on
 the same source commits, selected bytes and processing configuration: expect zero
 additions/replacements/deletions and unchanged publication identity. Verify actual
 source revisions in both runs. A new commit outside the selected files can advance

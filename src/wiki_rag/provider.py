@@ -163,6 +163,73 @@ class OpenAIProvider:
             json={"file_id": fid, "attributes": attributes, "chunking_strategy": chunking},
         )
 
+    def attach_batch(self, store, items, chunking):
+        """Submit once; per-file journal intents reconcile an uncertain response."""
+        store = identifier(store, "vs_")
+        if not 1 <= len(items) <= 2000:
+            raise RagError("attachment batch requires 1..2000 files")
+        files = []
+        for item in items:
+            files.append(
+                {
+                    "file_id": identifier(item["file_id"], "file-"),
+                    "attributes": item["attributes"],
+                    "chunking_strategy": chunking,
+                }
+            )
+        data = self.json("POST", f"vector_stores/{store}/file_batches", json={"files": files})
+        identifier(data.get("id"), "vsfb_")
+        if data.get("status") not in {"in_progress", "completed", "failed", "cancelled"}:
+            raise RagError("invalid provider batch response; write outcome may be unknown")
+        return data
+
+    def attachments_by_id(self, store, ids):
+        """Bounded listing for uncertain attachment reconciliation, never readiness polling."""
+        store = identifier(store, "vs_")
+        wanted = {identifier(fid, "file-") for fid in ids}
+        if not wanted or len(wanted) > 10000:
+            raise RagError("invalid attachment reconciliation size")
+        found, seen, after = {}, set(), None
+        for _ in range(1000):
+            params = {"limit": 100, "order": "asc"}
+            if after:
+                params["after"] = after
+            response = self.request("GET", f"vector_stores/{store}/files", params=params)
+            if len(response.content) > 2 * 1024 * 1024:
+                raise RagError("provider file list exceeds size bound")
+            try:
+                data = response.json()
+            except ValueError:
+                raise RagError("invalid provider file list") from None
+            if (
+                not isinstance(data, dict)
+                or not isinstance(data.get("data"), list)
+                or len(data["data"]) > 100
+                or type(data.get("has_more")) is not bool
+            ):
+                raise RagError("invalid provider file list")
+            for item in data["data"]:
+                if not isinstance(item, dict):
+                    raise RagError("invalid provider attachment")
+                fid = identifier(item.get("id"), "file-")
+                if fid in wanted:
+                    if fid in found or not isinstance(item.get("attributes"), dict):
+                        raise RagError("invalid provider attachment")
+                    found[fid] = item
+            if not data["has_more"] or wanted == found.keys():
+                return found
+            after = data.get("last_id")
+            if (
+                not data["data"]
+                or not after
+                or after in seen
+                or after != data["data"][-1].get("id")
+            ):
+                raise RagError("invalid provider pagination")
+            identifier(after, "file-")
+            seen.add(after)
+        raise RagError("provider reconciliation pagination limit reached")
+
     def attachment(self, store, fid):
         store, fid = identifier(store, "vs_"), identifier(fid, "file-")
         return self.json("GET", f"vector_stores/{store}/files/{fid}", missing_ok=True)

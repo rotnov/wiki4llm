@@ -343,9 +343,18 @@ def main(argv=None):
         publication = result.get("publication_id", "")
         if publication and not re.fullmatch(r"[0-9a-f-]{36}", publication):
             raise RagError("invalid publication output")
+        job = result.get("job_id", "")
+        if job and not re.fullmatch(r"[0-9a-f-]{36}", job):
+            raise RagError("invalid job output")
+        mode = result["mode"]
+        if mode not in {"preview", "submitted", "applied"}:
+            raise RagError("invalid mode output")
         if os.environ.get("GITHUB_OUTPUT"):
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
-                stream.write(f"workspace={result['workspace']}\npublication-id={publication}\n")
+                stream.write(
+                    f"workspace={result['workspace']}\npublication-id={publication}\n"
+                    f"job-id={job}\nmode={mode}\n"
+                )
         print(json.dumps(summarize(result), indent=2))
         return 0
     except RagError as exc:
