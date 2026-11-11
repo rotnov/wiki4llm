@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validatePattern } from "../src/policy.js";
 import { emailAddress } from "../src/email.js";
 import { readFile, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
@@ -19,6 +20,13 @@ const slug = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   .max(80);
+const invitationWorkspace = z.string().refine((value) => {
+  try {
+    return value !== "*" && validatePattern(value) === value;
+  } catch {
+    return false;
+  }
+});
 const generation = z.string().regex(/^o-[a-f0-9]{64}$/);
 const identity = z.string().max(300);
 const statusOptions = z
@@ -92,7 +100,7 @@ function safeResult(command: AdminCommand, value: unknown): unknown {
         id: z.string().uuid(),
         email: z.string().refine((v) => emailAddress(v) !== undefined),
         issuer: z.string().url(),
-        workspaces: z.array(slug).min(1).max(100),
+        workspaces: z.array(invitationWorkspace).min(1).max(100),
         expiresAt: z.number().int().positive(),
         status: z.enum(["pending", "accepted", "revoked", "expired"]),
       })

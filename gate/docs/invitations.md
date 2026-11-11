@@ -1,7 +1,7 @@
 # Email-bound invitation links
 
-An administrator creates a one-time link for an email and an explicit list of
-published workspaces. The recipient opens it, authenticates through Cloudflare
+An administrator creates a one-time link for an email and workspace slugs or namespace
+patterns such as `amplifier-*`. The recipient opens it, authenticates through Cloudflare
 Access, and receives reader permissions on their issuer-scoped identity. The
 success page shows the authenticated email and a list of effective workspaces.
 The creation result supplies an English MCP prompt for the administrator to
@@ -31,8 +31,14 @@ The result is `{id, url, expiresAt, prompt}`. Share the URL and connection promp
 privately with the intended recipient. The raw token is returned only on creation; the database stores its
 SHA-256 hash. Lost links require a new invitation and revocation of the old one.
 The default lifetime is seven days; explicit lifetimes range from 60 seconds to
-30 days. Workspace slugs must already exist. Wildcards are rejected: resolve
-“all Amplifier workspaces” to the intended current inventory before creation.
+30 days. Exact workspace slugs must already exist. Namespace patterns such as `amplifier-*`
+are stored verbatim as allow grants and include future matching workspaces; they
+can be issued before the first matching workspace is published. A namespace mask
+matches `amplifier-project` but not `amplifier` or `amplifierx-project`. Existing
+deny rules still take precedence. Global `*` and arbitrary glob syntax are rejected.
+For “all Amplifier workspaces”, use the verified `amplifier-*` namespace rather than
+expanding it to today's list. Status returns the stored patterns; the recipient
+page shows the currently published workspaces those grants permit.
 
 For status or revocation, put `{"id":"the-returned-uuid"}` in a private JSON file:
 

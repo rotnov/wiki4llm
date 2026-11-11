@@ -20,9 +20,12 @@ implementation or a successful source publication is not a Worker rollout.
 
 Resolve the actual installation, recipient and workspace scope from the request
 and authorized inventory. Treat examples as examples. For “all Amplifier
-workspaces”, resolve the intended current workspace list; do not infer ownership
-from email domains or use global `*`. Invitations accept exact published workspace
-slugs, not wildcard grants or automatic future-workspace membership.
+workspaces”, verify the actual namespace and preserve the requested prefix mask
+(e.g. `amplifier-*`) verbatim. Do not expand it to a snapshot of current workspace
+names: future matching projects must inherit access. Do not infer a namespace
+from email domains or substitute global `*`. Exact slugs must already be published;
+prefix grants can precede publication. Confirm stored masks in the status readback,
+and distinguish those grants from the current effective workspace list on the page.
 
 Check that Access permits the recipient to authenticate, without broadening the
 policy implicitly. Confirm the reader origin and identity realm. Preserve existing

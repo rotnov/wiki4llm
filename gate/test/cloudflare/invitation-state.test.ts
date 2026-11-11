@@ -5,7 +5,7 @@ import type { DurableObjectStorage } from "@cloudflare/workers-types/index.js";
 import { Invitations } from "../../src/cloudflare/invitations.js";
 import { CloudState } from "../../src/cloudflare/state.js";
 
-test("invitation expiry, issuer isolation and transaction rollback preserve pending state", () => {
+function storageFixture() {
   const db = new DatabaseSync(":memory:");
   const storage = {
     sql: {
@@ -33,6 +33,11 @@ test("invitation expiry, issuer isolation and transaction rollback preserve pend
       }
     },
   } as unknown as DurableObjectStorage;
+  return { db, storage };
+}
+
+test("invitation expiry, issuer isolation and transaction rollback preserve pending state", () => {
+  const { db, storage } = storageFixture();
   const issuer = "https://example.cloudflareaccess.com";
   const state = new CloudState(storage, issuer, "aud");
   db.exec("INSERT INTO workspaces VALUES('example','g','[]',1,1,'d')");
@@ -120,6 +125,88 @@ test("invitation expiry, issuer isolation and transaction rollback preserve pend
     assert.equal(
       db.prepare("SELECT principal FROM identities").get()!.principal,
       "full",
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("prefix invitations preserve namespace grants for workspaces published after acceptance", () => {
+  const { db, storage } = storageFixture();
+  const issuer = "https://example.cloudflareaccess.com";
+  const state = new CloudState(storage, issuer, "aud");
+  const invitations = new Invitations(storage, state);
+  const identity = {
+    issuer,
+    key: "user:future",
+    email: "future@example.org",
+    expiresAt: Date.now() + 86400000,
+  };
+  try {
+    for (const pattern of [
+      "*",
+      "amplifier*",
+      "amplifier-**",
+      "amplifier-*/nested",
+      "missing-exact",
+    ])
+      assert.throws(() =>
+        invitations.create(
+          { email: identity.email, workspaces: [pattern] },
+          issuer,
+          "https://gate.example",
+          identity,
+        ),
+      );
+    state.setPrincipal(
+      "restricted",
+      { allow: [], deny: ["amplifier-blocked"] },
+      true,
+    );
+    state.bind(identity.key, "restricted", true);
+    const invitation = invitations.create(
+      { email: identity.email, workspaces: ["amplifier-*"] },
+      issuer,
+      "https://gate.example",
+      identity,
+    );
+    assert.deepEqual(invitations.status({ id: invitation.id }).workspaces, [
+      "amplifier-*",
+    ]);
+    assert.match(invitation.prompt, /amplifier-\*/);
+    const accepted = invitations.accept(
+      invitation.url.split("/").at(-1)!,
+      identity,
+    );
+    assert.deepEqual(accepted.workspaces, []);
+    for (const id of [
+      "amplifier-meddylib",
+      "amplifier-new-project",
+      "amplifier-blocked",
+      "amplifier",
+      "amplifierx-other",
+      "demo",
+    ])
+      db.prepare("INSERT INTO workspaces VALUES(?,'g','[]',1,1,'d')").run(id);
+    assert.deepEqual(state.context(identity).allowed, [
+      "amplifier-meddylib",
+      "amplifier-new-project",
+    ]);
+    const grants = JSON.parse(
+      String(
+        db
+          .prepare("SELECT grants_json FROM principals WHERE id=?")
+          .get("invite-" + invitation.id)!.grants_json,
+      ),
+    );
+    assert.deepEqual(grants, {
+      allow: ["amplifier-*"],
+      deny: ["amplifier-blocked"],
+    });
+    assert.deepEqual(
+      invitations.recipientAccess(invitation.url.split("/").at(-1)!, identity)!
+        .workspaces,
+      ["amplifier-meddylib", "amplifier-new-project"],
     );
   } finally {
     db.close();

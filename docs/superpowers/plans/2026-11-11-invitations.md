@@ -2,7 +2,7 @@
 
 > Execute inline with behavior tests before runtime changes.
 
-**Goal:** An administrator creates an email-bound link with exact workspace grants;
+**Goal:** An administrator creates an email-bound link with exact workspace or namespace grants;
 Cloudflare authentication activates it and displays effective workspaces. The
 administrator receives the connection prompt to forward with the invitation.
 
@@ -38,3 +38,10 @@ No invitation mail is sent automatically. Links expire after seven days by defau
 The administrator forwards the connection prompt with the invitation. The
 recipient page displays only their email and effective workspace list. Reloading
 an accepted invitation reads current grants without granting or re-enabling access.
+
+## Persistent namespace grants
+
+Invitation scope preserves requested namespace masks such as `amplifier-*` so
+projects published later inherit access. Exact slugs still require an existing
+workspace; global `*` and malformed globs are rejected. Status reports stored
+grants; the recipient page reports effective published workspaces.
