@@ -32,7 +32,8 @@ uv run wiki-rag --config "$RAG_CONFIG" index --apply
 `index --apply` initializes or resumes/converges; `update --apply` requires initialized
 state. A remote preview reads the authority but makes no provider writes. Inspect
 selection before an approved upload. Only Git-tracked eligible files are candidates;
-include globs and extension allowlist must both match, and excludes win. Remote mode
+include globs must match, an optional extension allowlist further restricts them,
+and excludes win. Remote mode
 requires full committed history and literal selected HEAD bytes, with ancestry
 checks. Do not disable these guards to run a dirty or divergent source.
 

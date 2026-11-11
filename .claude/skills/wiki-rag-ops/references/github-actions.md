@@ -18,7 +18,7 @@ Resolve these fields before configuring the caller:
 - Consumer `owner/repository`, workflow filename and manual dispatch ref.
 - Workspace, OpenAI project, complete collection/store ownership, backend origin.
 - For every collection: repository, source branch, include/exclude globs and
-  extension allowlist. Equal paths in separate collections are valid.
+  optional extension allowlist. Equal paths in separate collections are valid.
 - Publisher GitHub environment and its allowed branches/reviewer requirements.
 - Tool version choice: existing approved `@main`, or matching reviewed SHA pins.
 
