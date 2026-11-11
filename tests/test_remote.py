@@ -704,8 +704,9 @@ def substitute_source(repo, tmp_path, substitution):
         "secret",
     ],
 )
+@pytest.mark.parametrize("omit_extensions", [False, True])
 def test_remote_uncommitted_substitution_cannot_publish_deletion(
-    tmp_path, repo, monkeypatch, substitution
+    tmp_path, repo, monkeypatch, substitution, omit_extensions
 ):
     from test_engine import FakeProvider
 
@@ -714,6 +715,10 @@ def test_remote_uncommitted_substitution_cannot_publish_deletion(
     tracked(repo, "docs/a.md")
     git(repo, "commit", "-m", "first")
     cfg = remote_config(tmp_path, repo)
+    if omit_extensions:
+        path = tmp_path / "wiki-rag.toml"
+        path.write_text(path.read_text().replace('extensions = [".md", ".rst", ".pdf"]', ""))
+        cfg = load_config(path)
     authority, provider = Authority(cfg), FakeProvider()
     with backend(cfg, authority, monkeypatch) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)

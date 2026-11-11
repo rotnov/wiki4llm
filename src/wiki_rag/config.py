@@ -59,7 +59,7 @@ class Collection:
     branch: str | None
     include: tuple[str, ...]
     exclude: tuple[str, ...]
-    extensions: tuple[str, ...]
+    extensions: tuple[str, ...] | None
 
     def binding(self):
         return {
@@ -207,10 +207,10 @@ def config_from_mapping(raw, path):
                 "exclude",
                 "extensions",
             },
-            {"name", "repository", "root", "vector_store_id", "include", "extensions"},
+            {"name", "repository", "root", "vector_store_id", "include"},
         )
-        ext = patterns(item["extensions"])
-        if not ext or any(not re.fullmatch(r"\.[a-z0-9]+", e) for e in ext):
+        ext = patterns(item["extensions"]) if "extensions" in item else None
+        if ext is not None and (not ext or any(not re.fullmatch(r"\.[a-z0-9]+", e) for e in ext)):
             raise RagError("extensions require lowercase dotted suffixes")
         collections.append(
             Collection(

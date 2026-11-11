@@ -90,7 +90,9 @@ detached HEAD is rejected when `branch` is configured. Remote mode requires full
 history, an index equal to HEAD and selected literal HEAD blob bytes; see the
 [remote source policy](docs/remote-state.md#source-policy).
 
-Both the include glob and extension allowlist must match. Excludes always win.
+Include globs select paths; excludes always win. An optional `extensions` allowlist
+further restricts matching files. Omit it when the globs already specify the desired
+suffixes; omission adds no extension filter, while an explicit list must be nonempty.
 Globs are case-sensitive, root-relative POSIX paths: `*`, `?`, and bracket
 classes match within one segment; a standalone `**` segment matches zero or
 more segments. `**/*.md` includes root-level Markdown. There is no brace
@@ -109,8 +111,8 @@ Eligible text is sent unchanged as a uniquely named `.txt` file. The original
 path and kind remain in attributes and the manifest. LFS pointers, NUL-containing
 or non-UTF-8 text, and unsupported formats are reported as skipped.
 
-PDFs are supported only when `.pdf` is explicitly present in the collection's
-extension allowlist and its include globs match. They are sent with their original
+PDFs are supported when include globs match and the optional extension allowlist
+permits `.pdf` (or is omitted). They are sent with their original
 raw bytes, a `.pdf` filename and `application/pdf` MIME type. A bounded check
 requires a PDF 1.0–1.7 or 2.0 header and a trailing `%%EOF` marker within the last
 1024 bytes. This is a sanity check, not structural PDF validation; provider

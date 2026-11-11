@@ -49,9 +49,11 @@ no TOML file or configuration checkout is needed in that mode.
 | `config-repository`     | Caller               | Optional separate repository for TOML configuration                   |
 | `config-ref`            | Triggering SHA       | Required when using another config repository                         |
 
-Each collection has `name`, `repository`, `branch`, `vector_store_id`, `include`
-and `extensions`, plus optional `exclude`. Include/exclude values and extensions
-are arrays; repository names are `owner/repository` and branches are explicit.
+Each collection has `name`, `repository`, `branch`, `vector_store_id` and `include`,
+plus optional `exclude` and `extensions`. Omit `extensions` to select supported
+formats using include/exclude alone; an explicit nonempty list further restricts
+the selection. Include/exclude values and extensions are arrays; repository names
+are `owner/repository` and branches are explicit.
 Do not supply `root`: the runner owns the disposable source directories. Shared
 TOML validators enforce the same identifiers, glob rules, limits and unique
 collection/store bindings. Credentials remain under `secrets:`, never in inputs.

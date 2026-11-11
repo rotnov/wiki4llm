@@ -401,7 +401,9 @@ def test_invalid_branch_never_runs_engine(repo, credentials, branch):
     assert all(c.closed for c in clients)
 
 
-@pytest.mark.parametrize("direct_inputs", [False, True, "unlimited", "numeric-unlimited"])
+@pytest.mark.parametrize(
+    "direct_inputs", [False, True, "unlimited", "numeric-unlimited", "no-extensions"]
+)
 def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     repo, tmp_path, credentials, monkeypatch, capsys, direct_inputs
 ):
@@ -419,6 +421,11 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
             )
         if direct_inputs == "numeric-unlimited":
             params.update({f"max-{name}": -1 for name in ("files", "file-bytes", "total-bytes")})
+        if direct_inputs == "no-extensions":
+            collections = json.loads(params["collections"])
+            for collection in collections:
+                collection.pop("extensions")
+            params["collections"] = json.dumps(collections)
         monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", json.dumps(params))
     else:
         configuration(repo)

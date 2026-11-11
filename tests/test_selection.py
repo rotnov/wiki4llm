@@ -198,3 +198,65 @@ def test_symlinked_config_directory_is_rejected_before_read(tmp_path, repo):
     link.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(app.RagError, match="symlink"):
         app.load_config(link / ".." / path.name)
+
+
+@pytest.mark.parametrize("extensions", [None, '[".md", ".py"]'])
+def test_precise_includes_work_with_optional_extensions(tmp_path, repo, extensions):
+    app = api()
+    for name in ("README.md", "other.md", "src/a.py", "src/nested/b.py", "src/no.json"):
+        tracked(repo, name)
+    path = config_file(tmp_path, repo)
+    text = path.read_text().replace(
+        'include = ["**/*.md", "**/*.rst", "**/*.pdf"]', 'include = ["README.md", "src/**/*.py"]'
+    )
+    text = text.replace(
+        'extensions = [".md", ".rst", ".pdf"]',
+        "" if extensions is None else f"extensions = {extensions}",
+    )
+    path.write_text(text)
+    assert set(app.scan(app.load_config(path))["guide"].files) == {
+        "README.md",
+        "src/a.py",
+        "src/nested/b.py",
+    }
+
+
+@pytest.mark.parametrize("extensions", [None, '[".md"]'])
+def test_optional_extensions_preserve_format_and_secret_filters(tmp_path, repo, extensions):
+    app = api()
+    for name, data in {
+        "a.md": "hello",
+        "b.py": "pass",
+        "private/c.py": "excluded",
+        ".env.py": "secret",
+        "empty.md": "",
+        "binary.py": b"a\x00b",
+        "no.png": b"image",
+        "valid.pdf": b"%PDF-1.7\nsynthetic\n%%EOF",
+        "invalid.pdf": b"%PDF-invalid",
+        "key.py": "-----BEGIN " + "PRIVATE KEY-----",
+    }.items():
+        tracked(repo, name, data)
+    path = config_file(tmp_path, repo)
+    text = path.read_text().replace(
+        'include = ["**/*.md", "**/*.rst", "**/*.pdf"]', 'include = ["**/*"]'
+    )
+    text = text.replace(
+        'extensions = [".md", ".rst", ".pdf"]',
+        "" if extensions is None else f"extensions = {extensions}",
+    )
+    text = text.replace('exclude = ["private/**"]', 'exclude = ["private/**", "empty.md"]')
+    path.write_text(text)
+    expected = {"a.md", "b.py", "valid.pdf"} if extensions is None else {"a.md"}
+    assert set(app.scan(app.load_config(path))["guide"].files) == expected
+
+
+@pytest.mark.parametrize("value", ["[]", '["md"]', '[".MD"]', '".md"', "false", "[1]"])
+def test_explicit_extensions_still_validate(tmp_path, repo, value):
+    app = api()
+    path = config_file(tmp_path, repo)
+    path.write_text(
+        path.read_text().replace('extensions = [".md", ".rst", ".pdf"]', f"extensions = {value}")
+    )
+    with pytest.raises(app.RagError):
+        app.load_config(path)

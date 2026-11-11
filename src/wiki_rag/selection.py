@@ -218,7 +218,10 @@ def scan(cfg):
                 reason = "excluded"
             elif not any(matches(relative, pat) for pat in collection.include):
                 reason = "not included"
-            elif path.suffix.lower() not in collection.extensions:
+            elif (
+                collection.extensions is not None
+                and path.suffix.lower() not in collection.extensions
+            ):
                 reason = "extension not allowed"
             if (
                 cfg.remote_state
@@ -228,7 +231,7 @@ def scan(cfg):
                 and not any(SECRET_NAME.search(p) or p in {".ssh", ".aws", ".gnupg"} for p in parts)
                 and not any(matches(relative, pat) for pat in collection.exclude)
                 and any(matches(relative, pat) for pat in collection.include)
-                and path.suffix.lower() in collection.extensions
+                and (collection.extensions is None or path.suffix.lower() in collection.extensions)
             ):
                 # Working-tree boundaries cannot turn a selected HEAD regular file
                 # into an unpublished deletion. Committed links remain exclusions.
