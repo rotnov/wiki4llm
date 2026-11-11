@@ -4,7 +4,10 @@ The static page in `site/` explains wiki4llm's purpose and data flow. It is not
 an installation inventory or a claim that every repository has been onboarded.
 Use only the wiki4llm brand on this page. Keep private project names, installation
 identifiers, server addresses and domain names out of its content and assets.
-The page loads no external fonts, scripts, analytics or images.
+The page loads no external fonts, scripts, analytics or images. The local
+`site/install.js` copies the visible skill-install command on request and selects
+it for manual copying when clipboard access is unavailable. Verify copying and
+its fallback along with desktop/mobile layout when changing this control.
 
 The Pages workflow uploads only `site/`, never the repository root, operator data,
 test corpora or deployment receipts. Enable GitHub Pages with GitHub Actions as
