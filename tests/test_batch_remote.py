@@ -342,6 +342,17 @@ def test_bulk_lookup_checkpoint_and_attachment_limits(tmp_path, repo, monkeypatc
     assert [len(items) for _, items, _ in provider.batches] == [60, 60, 10]
 
 
+def test_default_attachment_batches_bound_provider_work_without_waiting(
+    tmp_path, repo, monkeypatch
+):
+    cfg, authority, provider = setup_batch(tmp_path, repo, 501)
+    result = invoke(cfg, authority, provider, monkeypatch)
+    assert result["mode"] == "submitted"
+    assert [len(items) for _, items, _ in provider.batches] == [500, 1]
+    assert provider.uploads == 501 and provider.polls == 0
+    assert all(op["phase"] == "attached" for op in authority.ops.values())
+
+
 def test_poison_drains_active_uploads_without_further_journal_writes(tmp_path, repo, monkeypatch):
     cfg, authority, provider = setup_batch(tmp_path, repo, 12)
     original = provider.upload

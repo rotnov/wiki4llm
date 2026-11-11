@@ -11,7 +11,7 @@ from .remote_state import encode
 from .selection import stable_hash
 
 UPLOAD_WORKERS = 8
-ATTACH_BATCH = 2000
+ATTACH_BATCH = 500
 
 
 def operation_id(cfg, collection, file):

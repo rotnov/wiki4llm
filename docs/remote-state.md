@@ -46,7 +46,9 @@ retries a changed generation at most twice.
 ## Asynchronous submission
 
 The CLI uploads at most eight files concurrently and submits attachments in batches
-of at most 2000 per store, preserving each file's attributes and chunking. Only the
+of at most 500 per store, preserving each file's attributes and chunking. This
+operational size keeps individual provider requests below the API's larger maximum;
+it does not limit the total corpus. Only the
 active upload window receives durable upload intents. Journal mutations stay on the
 coordinator thread, and all dispatched workers drain before clients close. On an
 ordinary upload failure, successful sibling receipts are persisted; authority loss
