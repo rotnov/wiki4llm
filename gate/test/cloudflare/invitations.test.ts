@@ -215,9 +215,21 @@ test("invitation activation binds only its authenticated recipient and preserves
       (await rpc("query", { query: "fixture", workspaces: ["other"] })).isError,
       true,
     );
-    assert.equal(
+    const promptUrls = invitation.prompt.match(/https:\/\/[^\s]+/g);
+    assert.deepEqual(promptUrls, [invitation.url, "https://gate.example/mcp"]);
+    assert.match(invitation.prompt, /I will sign in as person@example\.org/);
+    assert.ok(
+      invitation.prompt.indexOf("Access granted") >= 0 &&
+        invitation.prompt.indexOf("Access granted") <
+          invitation.prompt.indexOf("Then use computer use"),
+    );
+    assert.match(
       invitation.prompt,
-      "Connect wiki4llm MCP as a web connection: https://gate.example/mcp.\nUse person@example.org to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to example and retrieve a document.",
+      /Do not use local config files or CLI commands/,
+    );
+    assert.match(
+      invitation.prompt,
+      /Finally, verify access to example and retrieve a document/,
     );
     assert.equal("prompt" in result, false);
     const acceptedPage = await req(

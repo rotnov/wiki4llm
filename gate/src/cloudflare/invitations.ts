@@ -66,8 +66,19 @@ export class Invitations {
       "pending",
     );
     const email = emailAddress(a.email)!;
-    const prompt = `Connect wiki4llm MCP as a web connection: ${origin}/mcp.\nUse ${email} to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to ${workspaces.join(", ")} and retrieve a document.`;
-    return { id, url: origin + "/invite/" + token, expiresAt, prompt };
+    const url = origin + "/invite/" + token;
+    const prompt = `First, open this wiki4llm invitation:
+${url}
+
+I will sign in as ${email}. Wait until the page shows "Access granted".
+
+Then use computer use to add wiki4llm as a web connector through the application UI:
+${origin}/mcp
+
+Do not use local config files or CLI commands. If prompted, I will authenticate again with the same email.
+
+Finally, verify access to ${workspaces.join(", ")} and retrieve a document.`;
+    return { id, url, expiresAt, prompt };
   }
   status(value: unknown) {
     const { id } = identifier.parse(value),

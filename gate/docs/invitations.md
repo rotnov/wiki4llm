@@ -5,7 +5,7 @@ patterns such as `amplifier-*`. The recipient opens it, authenticates through Cl
 Access, and receives reader permissions on their issuer-scoped identity. The
 success page shows the authenticated email and a list of effective workspaces.
 The creation result supplies an English MCP prompt for the administrator to
-forward to the teammate alongside the invitation link. No separate acceptance
+forward to the teammate as one block containing the invitation link. No separate acceptance
 button is needed. Creating an invitation does not send mail.
 
 ## Operator commands
@@ -28,7 +28,10 @@ npm run admin:worker -- "$GATE_ORIGIN" invite .data/invite.json
 ```
 
 The result is `{id, url, expiresAt, prompt}`. Share the URL and connection prompt
-privately with the intended recipient. The raw token is returned only on creation; the database stores its
+privately with the intended recipient. The prompt embeds the exact invitation URL
+and instructs the recipient to wait for **Access granted** before adding the web
+connector through computer use. Do not send only the MCP URL: connector OAuth
+login alone does not accept the invitation. The raw token is returned only on creation; the database stores its
 SHA-256 hash. Lost links require a new invitation and revocation of the old one.
 The default lifetime is seven days; explicit lifetimes range from 60 seconds to
 30 days. Exact workspace slugs must already exist. Namespace patterns such as `amplifier-*`
