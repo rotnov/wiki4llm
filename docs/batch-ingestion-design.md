@@ -5,8 +5,10 @@
 Upload independent files concurrently, submit vector-store attachments in batches,
 and check readiness for the collection rather than waiting after each file.
 Preserve the existing publication until all required files are complete.
-The CLI/workflow sync returns after durable submission. No CI runner polls OpenAI
-or waits for indexing. A Cloudflare Durable Object alarm verifies readiness and
+The CLI sync returns after durable submission. The reusable GitHub workflow adds
+a separate gate-status wait bounded to five minutes; no CI runner polls OpenAI.
+Failure or timeout makes the workflow fail without cancelling the background job.
+A Cloudflare Durable Object alarm verifies readiness and
 publishes the captured immutable snapshot. Submission is never reported as a
 completed index; publisher status reports pending, failed, superseded or complete.
 

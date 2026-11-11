@@ -64,8 +64,9 @@ Job metadata includes `created_at` and nullable `finished_at` (Unix milliseconds
 plus nullable `duration_ms`. Pending jobs and legacy jobs without a recorded end
 time have no duration. For an already-published workspace, the read-only MCP
 `status` tool exposes this metadata as `indexing`; `documents` still counts the
-active publication. This does not send a GitHub notification: a successful
-submission run alone does not establish successful publication.
+active publication. The CLI remains asynchronous; the reusable GitHub workflow
+adds a separate five-minute status wait. That workflow fails on an indexing error
+or timeout, while a CLI submission alone does not establish successful publication.
 
 The gate's read credential only checks readiness; it never uploads, attaches or
 performs cleanup. The next publisher sync cleans obsolete owned resources before

@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -282,19 +283,50 @@ def workflow_config(inputs, workspace):
     return config_from_mapping(raw, workspace / "workflow-inputs.toml")
 
 
+def wait_for_publication(remote, job_id, *, monotonic=time.monotonic, sleep=time.sleep):
+    """Observe one submitted job without holding a lease or touching provider files."""
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f-]{36}", job_id):
+        raise RagError("wait requires the submitted job ID")
+    deadline = monotonic() + 300
+    while monotonic() < deadline:
+        job = remote.status().get("job")
+        if not job or job["id"] != job_id:
+            raise RagError(f"publication job {job_id} is missing or replaced by a newer run")
+        if monotonic() >= deadline:
+            break
+        state = job["status"]
+        if state == "complete":
+            if not job.get("publication_id") or job["completed"] != job["total"]:
+                raise RagError("completed publication has an invalid receipt")
+            return job
+        if state != "pending":
+            reason = job.get("error", "no provider error reported")
+            raise RagError(f"publication job {job_id}: {state} ({reason})")
+        print(
+            f"wiki-rag: publication {job_id}: pending ({job['completed']}/{job['total']})",
+            file=sys.stderr,
+        )
+        sleep(min(10, max(0, deadline - monotonic())))
+    raise RagError(
+        f"publication job {job_id} did not finish within 300 seconds; "
+        "background indexing continues; inspect MCP status before retrying"
+    )
+
+
 def execute(
     config_path,
     *,
     workspace,
     workflow_inputs=None,
     mode="sync",
+    job_id=None,
     lease_wait_seconds=300,
     engine=run_remote,
     remote_factory=RemoteState,
     provider_factory=OpenAIProvider,
 ):
-    if mode not in {"sync", "plan"}:
-        raise RagError("mode must be sync or plan")
+    if mode not in {"sync", "plan", "wait"}:
+        raise RagError("mode must be sync, plan or wait")
     if type(lease_wait_seconds) is not int or not 0 <= lease_wait_seconds <= 1800:
         raise RagError("lease wait must be an integer from 0 to 1800")
     workspace = lexical_path(workspace)
@@ -334,6 +366,16 @@ def execute(
     )
     secret("WIKI_RAG_ACCESS_CLIENT_ID")
     secret("WIKI_RAG_ACCESS_CLIENT_SECRET")
+    if mode == "wait":
+        with remote_factory(cfg) as remote:
+            job = wait_for_publication(remote, job_id)
+            return {
+                "mode": "applied",
+                "workspace": cfg.remote_state.workspace,
+                "job_id": job_id,
+                "publication_id": job["publication_id"],
+                "job": job,
+            }
     secret("WIKI_RAG_INGEST_KEY", required=mode == "sync")
     token = secret("WIKI_RAG_CHECKOUT_TOKEN", required=False)
     remote = provider = result = None
@@ -388,7 +430,8 @@ def main(argv=None):
     config_args = parser.add_mutually_exclusive_group()
     config_args.add_argument("--config")
     config_args.add_argument("--workflow-inputs", action="store_true")
-    parser.add_argument("--mode", default="sync", choices=("sync", "plan"))
+    parser.add_argument("--mode", default="sync", choices=("sync", "plan", "wait"))
+    parser.add_argument("--job-id")
     parser.add_argument("--lease-wait-seconds", type=int, default=300)
     args = parser.parse_args(argv)
     try:
@@ -405,6 +448,7 @@ def main(argv=None):
             workflow_inputs=inputs,
             workspace=os.environ.get("GITHUB_WORKSPACE", os.getcwd()),
             mode=args.mode,
+            job_id=args.job_id,
             lease_wait_seconds=args.lease_wait_seconds,
         )
         publication = result.get("publication_id", "")

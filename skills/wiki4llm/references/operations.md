@@ -61,8 +61,11 @@ execution, pin workflow and tool checkout to the same reviewed SHA; do not silen
 change an operator's chosen contract.
 
 The caller template is manual-only and defaults to `plan`. Run approved `sync`,
-record the submitted job ID and check `status --summary` for background completion.
-CI returns after submission; it never waits for OpenAI indexing. Then repeat sync at the same source revisions/configuration and check MCP before
+record the submitted job ID. The reusable workflow waits up to five minutes for
+that exact job through gate status, without polling OpenAI or holding a lease.
+Failure or timeout makes GHA red with a reason. A timeout does not cancel indexing:
+inspect MCP `status` or publisher `status --summary` before retrying. Direct CLI
+sync remains asynchronous. Then repeat sync at the same source revisions/configuration and check MCP before
 enabling an authorized push trigger. Automatic pushes must be from the default branch; manual branch dispatch must
 be allowed by the selected GitHub environment. PR/tag contexts are rejected. The
 dispatched workflow branch and each collection's configured source branch are
@@ -73,7 +76,8 @@ job with progress, sanitized errors and timing. `documents` counts the active
 publication, not the pending candidate. `finished_at` and `duration_ms` are null
 while pending and for legacy jobs whose finish time was not recorded. A failed
 job is terminal; do not describe it as still indexing or infer its duration from
-the shorter GitHub submission run. This status does not itself notify GitHub.
+the shorter GitHub submission step. Gate status does not push a notification;
+the workflow's bounded observer translates it into GitHub success or failure.
 
 For a requested pre-merge test, use the existing manual workflow path; do not invent
 a separate repository or corpus unless isolation is requested. Confirm whether the

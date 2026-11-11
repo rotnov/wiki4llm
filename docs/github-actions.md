@@ -162,16 +162,28 @@ Cleanup/release failures remain fatal, including after a committed publication.
 Workflow outputs:
 
 - `workspace`: selected workspace slug.
-- `publication-id`: existing publication UUID for an applied no-op; empty for submission/plan.
+- `publication-id`: confirmed publication UUID after waiting or for an applied no-op; empty for plan.
 - `job-id`: durable background job UUID for a submitted sync; otherwise empty.
-- `mode`: `preview`, `submitted` or `applied`.
+- `mode`: `preview` or `applied` on workflow success. The submission step itself returns `submitted`.
 
-Sync returns after bounded concurrent uploads, attachment batches and durable gate
-submission. It never polls OpenAI or keeps a CI runner alive waiting for indexing.
-A successful workflow proves submission only. Use `wiki-rag status --summary` with
-the publisher configuration to verify background completion, then check MCP and
-repeat sync at identical source revisions to verify a stable publication. Failed or
-superseded jobs preserve the previous publication. Deploy the gate with
+The sync step returns after bounded concurrent uploads, attachment batches and
+durable gate submission. A separate step polls gate status every ten seconds for
+the exact submitted job, for up to five minutes. It does not acquire a lease,
+clone sources or use the OpenAI key. A successful new submission workflow requires
+completed publication; no-op and plan runs skip this wait. Failed, revoked,
+superseded, missing or replaced jobs fail with a readable reason. Transport and
+authorization failures also fail rather than claiming a successful publication.
+
+The polling loop has a 300-second deadline. A GNU `timeout` process bound also
+covers blocked requests, with up to five seconds of termination grace; the step's
+six-minute outer limit is a last-resort runner guard. A timeout is red in GitHub
+but does not cancel background indexing. Inspect MCP `status` or publisher
+`wiki-rag status --summary` before retrying. This timeout starts after submission,
+separately from the whole job's existing 30-minute limit.
+
+After successful publication, check MCP and repeat sync at identical source
+revisions to verify a stable publication. Failed or superseded jobs preserve
+the previous publication. Deploy the gate with
 `async-submit-v1` support before updating callers to this tool revision.
 
 Job logs contain aggregate counts, configured workspace/collection labels and Git

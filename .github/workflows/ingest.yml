@@ -116,9 +116,9 @@ jobs:
       cancel-in-progress: false
     outputs:
       workspace: ${{ steps.ingest.outputs.workspace }}
-      publication-id: ${{ steps.ingest.outputs.publication-id }}
+      publication-id: ${{ steps.publication.outputs.publication-id || steps.ingest.outputs.publication-id }}
       job-id: ${{ steps.ingest.outputs.job-id }}
-      mode: ${{ steps.ingest.outputs.mode }}
+      mode: ${{ steps.publication.outputs.mode || steps.ingest.outputs.mode }}
     steps:
       - name: Validate workflow inputs
         env:
@@ -210,3 +210,35 @@ jobs:
           uv run --project "$GITHUB_WORKSPACE/.wiki-rag-tool" --frozen \
             python -m wiki_rag.github_actions "${config_args[@]}" \
             --mode "$MODE" --lease-wait-seconds "$LEASE_WAIT"
+      - name: Wait up to five minutes for publication
+        id: publication
+        if: steps.ingest.outputs.mode == 'submitted'
+        timeout-minutes: 6
+        env:
+          CONFIG_PATH: .wiki-rag-config/${{ inputs.config || 'wiki-rag.toml' }}
+          DIRECT_INPUTS: ${{ inputs.workspace != '' || inputs.project-id != '' || inputs.collections != '' }}
+          WIKI_RAG_WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
+          JOB_ID: ${{ steps.ingest.outputs.job-id }}
+          WIKI_RAG_GATE_ORIGIN: ${{ inputs.gate-origin }}
+          WIKI_RAG_ACCESS_CLIENT_ID: ${{ secrets.gate-client-id }}
+          WIKI_RAG_ACCESS_CLIENT_SECRET: ${{ secrets.gate-token }}
+        run: |
+          if [ "$DIRECT_INPUTS" = "true" ]; then
+            config_args=(--workflow-inputs)
+          else
+            config_args=(--config "$CONFIG_PATH")
+          fi
+          if timeout --kill-after=5s 300s \
+            uv run --project "$GITHUB_WORKSPACE/.wiki-rag-tool" --frozen \
+            python -m wiki_rag.github_actions "${config_args[@]}" \
+            --mode wait --job-id "$JOB_ID"; then
+            exit 0
+          else
+            code=$?
+            if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+              echo "::error::Publication did not finish within 5 minutes. Background indexing may still be running; inspect MCP status before retrying."
+            else
+              echo "::error::Publication verification failed. See the job status and reason above; ingestion submission alone is not success."
+            fi
+            exit "$code"
+          fi

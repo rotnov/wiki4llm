@@ -318,7 +318,10 @@ The command records the exact manifest, submitting publisher, binding, epoch,
 revision and per-file readiness in SQLite. It never receives an OpenAI key.
 
 Submission does not publish or poll OpenAI. The CLI releases its lease and the GHA
-job exits with `mode: submitted`; that is acceptance, not index completion.
+submission step exits with `mode: submitted`; that is acceptance, not index completion.
+The reusable GitHub workflow then polls status for that exact job for up to five
+minutes and fails on errors or timeout. This observer neither holds the lease nor
+cancels the background job when its wait expires.
 An already-current snapshot returns `mode: applied` with its stable publication
 ID and creates no new job. The publisher status command reports:
 

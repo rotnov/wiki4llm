@@ -17,6 +17,203 @@ def gha():
     return importlib.import_module("wiki_rag.github_actions")
 
 
+def test_publication_wait_tracks_exact_job_until_complete():
+    job_id = "a" * 36
+    states = iter(
+        [
+            {"id": job_id, "status": "pending", "total": 4, "completed": 2},
+            {
+                "id": job_id,
+                "status": "complete",
+                "total": 4,
+                "completed": 4,
+                "publication_id": "b" * 36,
+            },
+        ]
+    )
+
+    class Remote:
+        def status(self):
+            return {"job": next(states)}
+
+    sleeps = []
+    job = gha().wait_for_publication(Remote(), job_id, monotonic=lambda: 0, sleep=sleeps.append)
+    assert job["publication_id"] == "b" * 36
+    assert sleeps == [10]
+
+
+@pytest.mark.parametrize("status", ["failed", "revoked", "superseded"])
+def test_publication_wait_reports_terminal_reason(status):
+    class Remote:
+        def status(self):
+            return {
+                "job": {
+                    "id": "a" * 36,
+                    "status": status,
+                    "error": "provider_metadata_path_completed",
+                }
+            }
+
+    with pytest.raises(RagError, match=status):
+        gha().wait_for_publication(Remote(), "a" * 36)
+
+
+@pytest.mark.parametrize("job", [None, {"id": "b" * 36, "status": "complete"}])
+def test_publication_wait_cannot_accept_another_job(job):
+    class Remote:
+        def status(self):
+            return {"job": job}
+
+    with pytest.raises(RagError, match="missing or replaced"):
+        gha().wait_for_publication(Remote(), "a" * 36)
+
+
+def test_publication_wait_timeout_is_five_minutes_and_does_not_cancel():
+    class Clock:
+        now = 0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    class Remote:
+        calls = 0
+
+        def status(self):
+            self.calls += 1
+            return {"job": {"id": "a" * 36, "status": "pending", "total": 4, "completed": 2}}
+
+    clock, remote = Clock(), Remote()
+    with pytest.raises(RagError, match="300 seconds.*continues"):
+        gha().wait_for_publication(remote, "a" * 36, monotonic=clock.monotonic, sleep=clock.sleep)
+    assert clock.now == 300
+    assert remote.calls == 30
+
+
+def test_publication_wait_does_not_accept_completion_after_deadline():
+    clock = [0]
+
+    class Remote:
+        def status(self):
+            clock[0] = 301
+            return {
+                "job": {
+                    "id": "a" * 36,
+                    "status": "complete",
+                    "total": 1,
+                    "completed": 1,
+                    "publication_id": "b" * 36,
+                }
+            }
+
+    with pytest.raises(RagError, match="300 seconds"):
+        gha().wait_for_publication(Remote(), "a" * 36, monotonic=lambda: clock[0])
+
+
+@pytest.mark.parametrize("status", ["failed", "revoked", "superseded"])
+def test_wait_cli_exits_nonzero_with_terminal_reason(status, monkeypatch, capsys):
+    class Remote:
+        def status(self):
+            return {
+                "job": {
+                    "id": "a" * 36,
+                    "status": status,
+                    "error": "provider_metadata_path_completed",
+                }
+            }
+
+    def execute(*a, **kw):
+        return gha().wait_for_publication(Remote(), kw["job_id"])
+
+    monkeypatch.setattr(gha(), "execute", execute)
+    assert gha().main(["--mode", "wait", "--job-id", "a" * 36]) == 2
+    err = capsys.readouterr().err
+    assert status in err and "provider_metadata_path_completed" in err
+
+
+@pytest.mark.parametrize("exit_code", [0, 2, 124, 137])
+def test_actual_wait_step_preserves_failure_and_explains_timeout(tmp_path, exit_code):
+    import textwrap
+
+    workflow = (Path(__file__).parents[1] / ".github/workflows/ingest.yml").read_text()
+    step = workflow.split("      - name: Wait up to five minutes for publication\n")[1]
+    assert "if: steps.ingest.outputs.mode == 'submitted'" in step
+    assert "WIKI_RAG_INGEST_KEY" not in step
+    script = textwrap.dedent(step.split("        run: |\n")[1])
+    assert "timeout --kill-after=5s 300s" in script
+    timeout = tmp_path / "timeout"
+    timeout.write_text(f"#!/bin/sh\nexit {exit_code}\n")
+    timeout.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script],
+        env=dict(
+            os.environ,
+            PATH=f"{tmp_path}:{os.environ['PATH']}",
+            DIRECT_INPUTS="false",
+            CONFIG_PATH="wiki4llm.toml",
+            GITHUB_WORKSPACE=str(tmp_path),
+            JOB_ID="a" * 36,
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == exit_code
+    if exit_code in (124, 137):
+        assert "::error::" in result.stdout and "5 minutes" in result.stdout
+        assert "may still be running" in result.stdout
+    elif exit_code:
+        assert "::error::Publication verification failed" in result.stdout
+
+
+def test_wait_mode_reads_status_without_source_checkout_or_openai(repo, credentials, monkeypatch):
+    import httpx
+
+    from wiki_rag.remote_state import RemoteState
+
+    configuration(repo)
+    monkeypatch.delenv("WIKI_RAG_INGEST_KEY", raising=False)
+    clients, requests = [], []
+
+    def remote(cfg):
+        def handle(request):
+            requests.append((request.method, request.url.path))
+            return httpx.Response(
+                200,
+                json={
+                    "ownership": cfg.ownership,
+                    "revision": 1,
+                    "initialized": True,
+                    "job": {
+                        "id": "a" * 36,
+                        "status": "complete",
+                        "total": 1,
+                        "completed": 1,
+                        "publication_id": "b" * 36,
+                    },
+                },
+            )
+
+        client = RemoteState(cfg, transport=httpx.MockTransport(handle))
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(gha(), "checkout", lambda *a, **k: pytest.fail("wait must not clone"))
+    result = gha().execute(
+        "wiki-rag.toml",
+        workspace=repo,
+        mode="wait",
+        job_id="a" * 36,
+        remote_factory=remote,
+        provider_factory=lambda cfg: pytest.fail("wait must not access OpenAI"),
+    )
+    assert result["mode"] == "applied"
+    assert result["publication_id"] == "b" * 36
+    assert requests == [("GET", "/ingest/team-docs/status")]
+    assert clients[0].client.is_closed
+
+
 def configuration(repo, count=1):
     text = """version = 1
 [remote_state]

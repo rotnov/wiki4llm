@@ -202,8 +202,9 @@ collections under existing state is deliberately outside this MVP.
 
 Local-state ingestion uploads and attaches files serially, then polls until `completed`.
 Remote ingestion uploads with eight workers, batches attachments and submits the
-rescanned snapshot to the gate. CI never waits or polls for indexing; the gate
-verifies completion and publishes in the background.
+rescanned snapshot to the gate, which verifies completion and publishes in the
+background. The reusable GitHub workflow then waits up to five minutes for that
+exact job through gate status; failure or timeout makes the workflow fail.
 All configured collections publish together only after every selected file
 succeeds and a second source scan matches the captured selection. The previous
 manifest survives prepublication failure. Updates at identical source revisions,
