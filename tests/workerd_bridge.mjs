@@ -18,7 +18,19 @@ const issuer = "https://example.cloudflareaccess.com";
 const script = (
   await build({
     absWorkingDir: gate,
-    entryPoints: ["src/cloudflare/worker.ts"],
+    stdin: {resolveDir:gate,contents:`import worker,{GateDurableObject as Base} from './src/cloudflare/worker.ts';
+      export default worker;
+      export class GateDurableObject extends Base {
+        constructor(ctx,env){super(ctx,env);this.testStorage=ctx.storage;}
+        async fetch(req){
+          if(new URL(req.url).pathname==='/test-only/alarm'){
+            this.testStorage.sql.exec("UPDATE ingest_jobs SET next_at=0 WHERE status='pending'");
+            await this.alarm();
+            return Response.json(this.testStorage.sql.exec('SELECT id,status,error,total,completed FROM ingest_jobs').toArray());
+          }
+          return super.fetch(req);
+        }
+      }`},
     bundle: true,
     write: false,
     format: "esm",
@@ -28,6 +40,7 @@ const script = (
   })
 ).outputFiles[0].text;
 const persist = mkdtempSync(join(tmpdir(), "wiki-rag-cross-"));
+let providerFiles=[];
 const options = {
   cf: false,
   modules: true,
@@ -42,11 +55,32 @@ const options = {
     ACCESS_AUDIENCE: "test",
     PUBLIC_ORIGIN: "https://gate.example",
     ADMIN_IDENTITIES: '["user:admin"]',
+    QUERY_KEY:"synthetic",
   },
-  outboundService: async () => MFResponse.json({ keys: [jwk] }),
+  outboundService: async (request) => {
+    const url=new URL(request.url);
+    if(url.hostname!=="api.openai.com")return MFResponse.json({keys:[jwk]});
+    if(request.method!=="GET")throw new Error('background provider mutation');
+    const store=url.pathname.split('/')[3];
+    const all=providerFiles.filter(f=>f.vector_store_id===store);
+    const after=url.searchParams.get('after');
+    const start=after?all.findIndex(f=>f.id===after)+1:0;
+    const data=all.slice(start,start+100);
+    return MFResponse.json({data,has_more:start+data.length<all.length,last_id:data.at(-1)?.id});
+  },
 };
 let mf = new Miniflare(options);
 async function request(input) {
+  if(input.control==='complete'||input.control==='tick'){
+    providerFiles=input.files;
+    const ns=await mf.getDurableObjectNamespace('GATE');const stub=ns.get(ns.idFromName('authority-v1'));
+    for(let i=0;i<120;i++){
+      const response=await stub.fetch('https://gate.example/test-only/alarm');
+      const jobs=await response.json();
+      if(input.control==='tick'||jobs.every(j=>j.status!=='pending'))return {status:200,body:Buffer.from(JSON.stringify(jobs)).toString('base64')};
+    }
+    throw new Error('background did not complete within bounded test ticks');
+  }
   if (input.control === "restart") {
     await mf.dispose();
     if (input.expire) {

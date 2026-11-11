@@ -199,6 +199,30 @@ export class CloudState {
     );
   }
   // Only IngestionState calls this inside its journal/receipt transaction.
+  validateManaged(
+    id: string,
+    manifest: Manifest,
+    binding: OpenAIBinding,
+  ): void {
+    const prior = this.rows(
+      "SELECT prior_json FROM workspaces WHERE id=?",
+      id,
+    )[0];
+    const seen = this.rows(
+      "SELECT generation FROM publications WHERE workspace=? AND publication=?",
+      id,
+      manifest.publication_id,
+    )[0];
+    validatePublication(
+      binding,
+      manifest,
+      manifestGeneration(manifest),
+      prior
+        ? (JSON.parse(String(prior.prior_json)) as PriorPublication)
+        : undefined,
+      seen ? String(seen.generation) : undefined,
+    );
+  }
   importManaged(
     id: string,
     manifest: Manifest,

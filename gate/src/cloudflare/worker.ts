@@ -2,6 +2,7 @@ import type { DurableObjectState } from "@cloudflare/workers-types/index.js";
 import { z } from "zod";
 import { AccessVerifier, validIdentityKey, type Identity } from "./access.js";
 import { IngestionState } from "./ingestion.js";
+import { BackgroundFinalizer } from "./background.js";
 import { CloudState } from "./state.js";
 import { mcp } from "./mcp.js";
 import { Gateway } from "../gateway.js";
@@ -54,7 +55,7 @@ function route(request: Request, env: Env): string | Response {
   )
     return response(403);
   const ingest =
-    /^\/ingest\/[a-z0-9]+(?:-[a-z0-9]+)*\/(status|publication|lease|snapshot|operations|initialize|checkpoint|publish)$/.test(
+    /^\/ingest\/[a-z0-9]+(?:-[a-z0-9]+)*\/(status|publication|lease|snapshot|operations|initialize|checkpoint|publish|submit)$/.test(
       url.pathname,
     );
   if (
@@ -201,6 +202,7 @@ export class GateDurableObject {
   private readonly readerVerifier?: AccessVerifier;
   private readonly forwarderIdentity?: string;
   private readonly ingestion: IngestionState;
+  private readonly background: BackgroundFinalizer;
   private readonly queue = new BoundedQueue(16, 120000);
   private importing = false;
   private operators = 0;
@@ -229,6 +231,10 @@ export class GateDurableObject {
       forwarder?.issuer,
     );
     this.ingestion = new IngestionState(ctx.storage, this.state);
+    this.background = new BackgroundFinalizer(ctx.storage, this.ingestion, env);
+  }
+  async alarm() {
+    await this.background.alarm();
   }
   private async requestIdentity(request: Request) {
     const transport = await this.verifier.verify(
@@ -304,7 +310,7 @@ export class GateDurableObject {
       );
       return value instanceof Response ? value : Response.json(value);
     }
-    const large = action === "publish";
+    const large = action === "publish" || action === "submit";
     if (large ? this.importing : this.operators >= 4) return response(429);
     if (large) this.importing = true;
     else this.operators++;
@@ -340,6 +346,10 @@ export class GateDurableObject {
         case "publish":
           return Response.json(
             this.ingestion.publish(workspace!, identity, value),
+          );
+        case "submit":
+          return Response.json(
+            await this.background.submit(workspace!, identity, value),
           );
         default:
           return response(404);

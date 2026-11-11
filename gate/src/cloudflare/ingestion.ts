@@ -4,7 +4,12 @@ import type {
 } from "@cloudflare/workers-types/index.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { canonical, parseManifest, type OpenAIBinding } from "../manifest.js";
+import {
+  canonical,
+  parseManifest,
+  type Manifest,
+  type OpenAIBinding,
+} from "../manifest.js";
 import {
   validateSlug,
   validateGrants,
@@ -142,6 +147,36 @@ export const operationSchema = z
   )
   .refine((v) => Buffer.byteLength(JSON.stringify(v)) <= 8192);
 export type Operation = z.infer<typeof operationSchema>;
+export interface BackgroundJob {
+  workspace: string;
+  id: string;
+  owner: string;
+  epoch: number;
+  revision: number;
+  binding: OpenAIBinding;
+  store: string;
+  storeIndex: number;
+  after: string | null;
+  cursors: string[];
+  attempts: number;
+}
+export interface ProviderFilePage {
+  data: Array<{
+    id: string;
+    status: string;
+    attributes?: Record<string, unknown> | null;
+  }>;
+  has_more: boolean;
+  last_id?: string | null;
+}
+export class BackgroundFailure extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly fileId?: string,
+  ) {
+    super(code);
+  }
+}
 export const checkpointSchema = z
   .object({
     ...command,
@@ -204,7 +239,9 @@ export class IngestionState {
  CREATE TABLE IF NOT EXISTS ingest_uploads(project TEXT NOT NULL,filename TEXT NOT NULL,PRIMARY KEY(project,filename));
  CREATE TABLE IF NOT EXISTS ingest_files(project TEXT NOT NULL,file_id TEXT NOT NULL,workspace TEXT NOT NULL,operation_id TEXT NOT NULL,PRIMARY KEY(project,file_id));
  CREATE TABLE IF NOT EXISTS ingest_active(workspace TEXT NOT NULL,id TEXT NOT NULL,file_id TEXT NOT NULL,PRIMARY KEY(workspace,id));
- CREATE TABLE IF NOT EXISTS ingest_receipts(workspace TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,result_json TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(workspace,request_id));`);
+ CREATE TABLE IF NOT EXISTS ingest_receipts(workspace TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,result_json TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(workspace,request_id));
+ CREATE TABLE IF NOT EXISTS ingest_jobs(workspace TEXT PRIMARY KEY,id TEXT NOT NULL,status TEXT NOT NULL,owner TEXT NOT NULL,epoch INTEGER NOT NULL,revision INTEGER NOT NULL,manifest_json TEXT NOT NULL,binding_json TEXT NOT NULL,created_at INTEGER NOT NULL,next_at INTEGER NOT NULL,total INTEGER NOT NULL,completed INTEGER NOT NULL,store_index INTEGER NOT NULL DEFAULT 0,cursor TEXT,cursors_json TEXT NOT NULL DEFAULT '[]',attempts INTEGER NOT NULL DEFAULT 0,error TEXT,publication_id TEXT);
+ CREATE TABLE IF NOT EXISTS ingest_job_files(workspace TEXT NOT NULL,file_id TEXT NOT NULL,operation_id TEXT NOT NULL,store TEXT NOT NULL,attributes_json TEXT NOT NULL,ready INTEGER NOT NULL,PRIMARY KEY(workspace,file_id));`);
   }
   private rows(q: string, ...a: SqlStorageValue[]) {
     return this.storage.sql.exec(q, ...a).toArray();
@@ -259,6 +296,12 @@ export class IngestionState {
             "UPDATE ingest_authorities SET lease_expires=0 WHERE workspace=?",
             r.workspace,
           );
+      for (const r of this.rows(
+        "SELECT workspace FROM ingest_jobs WHERE owner=? AND status='pending'",
+        v.key,
+      ))
+        if (!this.permits(v.key, String(r.workspace)))
+          this.invalidateJob(String(r.workspace), "revoked");
     });
   }
   provision(value: unknown) {
@@ -296,6 +339,7 @@ export class IngestionState {
           +v.enabled,
           v.workspace,
         );
+        if (!v.enabled) this.invalidateJob(v.workspace, "revoked");
         return;
       }
       if (this.rows("SELECT id FROM workspaces WHERE id=?", v.workspace).length)
@@ -372,6 +416,7 @@ export class IngestionState {
         if (Number(a.epoch) >= Number.MAX_SAFE_INTEGER) conflict();
         const epoch = Number(a.epoch) + 1,
           expires = now + 120000;
+        this.invalidateJob(w, "superseded");
         this.storage.sql.exec(
           "UPDATE ingest_authorities SET epoch=?,lease_owner=?,lease_hash=?,lease_request=?,lease_expires=? WHERE workspace=?",
           epoch,
@@ -434,6 +479,8 @@ export class IngestionState {
       ownership: JSON.parse(String(a.ownership_json)),
       publication: this.publication(w),
       operation_count: Number(a.operation_count),
+      features: ["async-submit-v1"],
+      job: this.jobStatus(w),
     };
   }
   snapshot(w: string, i: Identity, value: unknown) {
@@ -502,6 +549,7 @@ export class IngestionState {
         v.expected_revision >= Number.MAX_SAFE_INTEGER
       )
         conflict();
+      if (kind !== "submit") this.invalidateJob(w, "superseded");
       const result = { ...effect(), revision: v.expected_revision + 1 };
       this.storage.sql.exec(
         "UPDATE ingest_authorities SET revision=? WHERE workspace=?",
@@ -692,58 +740,432 @@ export class IngestionState {
       return {};
     });
   }
+  private validatedManifest(
+    w: string,
+    text: string,
+    allowed: Operation["phase"][],
+  ) {
+    const a = this.authority(w);
+    if (!a.initialized) conflict();
+    const binding = JSON.parse(String(a.binding_json)) as OpenAIBinding,
+      ownership = JSON.parse(String(a.ownership_json)) as z.infer<
+        typeof provisionSchema
+      >["ownership"],
+      manifest = parseManifest(text, binding);
+    for (const [name, c] of Object.entries(manifest.collections)) {
+      const expected = ownership.collections[name];
+      if (
+        !expected ||
+        expected.repository !== c.repository ||
+        expected.branch !== c.branch ||
+        c.repository_commit === null
+      )
+        invalid();
+      for (const f of Object.values(c.files)) {
+        const row = this.rows(
+          "SELECT operation_json FROM ingest_operations WHERE workspace=? AND id=?",
+          w,
+          f.operation_id,
+        )[0];
+        if (!row) conflict();
+        const o = JSON.parse(String(row.operation_json)) as Operation;
+        if (
+          !allowed.includes(o.phase) ||
+          o.collection !== name ||
+          o.store !== f.vector_store_id ||
+          o.path !== f.path ||
+          o.version !== f.version ||
+          o.sha256 !== f.sha256 ||
+          o.file_id !== f.file_id ||
+          o.source_commit !== f.source_commit ||
+          f.operation_id.includes(".retired.")
+        )
+          conflict();
+      }
+    }
+    this.gate.validateManaged(w, manifest, binding);
+    return { manifest, binding, ownership };
+  }
+  private installPublication(
+    w: string,
+    manifest: Manifest,
+    binding: OpenAIBinding,
+  ) {
+    const published = this.gate.importManaged(w, manifest, binding);
+    this.storage.sql.exec("DELETE FROM ingest_active WHERE workspace=?", w);
+    for (const c of Object.values(manifest.collections))
+      for (const f of Object.values(c.files))
+        this.storage.sql.exec(
+          "INSERT INTO ingest_active VALUES(?,?,?)",
+          w,
+          f.operation_id,
+          f.file_id,
+        );
+    return { generation: published.generation };
+  }
   publish(w: string, i: Identity, value: unknown) {
     const v = publishSchema.parse(value);
     return this.commit(w, i, v, "publish", v, () => {
-      const a = this.authority(w);
-      if (!a.initialized) conflict();
-      const binding = JSON.parse(String(a.binding_json)) as OpenAIBinding,
-        ownership = JSON.parse(String(a.ownership_json)) as z.infer<
-          typeof provisionSchema
-        >["ownership"],
-        manifest = parseManifest(v.manifestText, binding);
-      for (const [name, c] of Object.entries(manifest.collections)) {
-        const expected = ownership.collections[name];
-        if (
-          !expected ||
-          expected.repository !== c.repository ||
-          expected.branch !== c.branch ||
-          c.repository_commit === null
-        )
-          invalid();
+      const { manifest, binding } = this.validatedManifest(w, v.manifestText, [
+        "complete",
+      ]);
+      return this.installPublication(w, manifest, binding);
+    });
+  }
+
+  private invalidateJob(w: string, status: "revoked" | "superseded") {
+    this.storage.sql.exec(
+      "UPDATE ingest_jobs SET status=?,next_at=0 WHERE workspace=? AND status='pending'",
+      status,
+      w,
+    );
+  }
+  private jobStatus(w: string) {
+    const r = this.rows(
+      "SELECT id,status,total,completed,error,publication_id FROM ingest_jobs WHERE workspace=?",
+      w,
+    )[0];
+    if (!r) return null;
+    return {
+      id: String(r.id),
+      status: String(r.status),
+      total: Number(r.total),
+      completed: Number(r.completed),
+      ...(r.error ? { error: String(r.error) } : {}),
+      ...(r.publication_id ? { publication_id: String(r.publication_id) } : {}),
+    };
+  }
+  submit(w: string, i: Identity, value: unknown) {
+    const v = publishSchema.parse(value);
+    return this.commit(w, i, v, "submit", v, () => {
+      const { manifest, binding, ownership } = this.validatedManifest(
+        w,
+        v.manifestText,
+        ["attached", "complete"],
+      );
+      const id = crypto.randomUUID(),
+        now = Date.now();
+      this.storage.sql.exec(
+        "DELETE FROM ingest_job_files WHERE workspace=?",
+        w,
+      );
+      let total = 0,
+        completed = 0;
+      for (const [name, c] of Object.entries(manifest.collections))
         for (const f of Object.values(c.files)) {
           const row = this.rows(
-            "SELECT operation_json FROM ingest_operations WHERE workspace=? AND id=?",
+            "SELECT phase FROM ingest_operations WHERE workspace=? AND id=?",
             w,
             f.operation_id,
-          )[0];
-          if (!row) conflict();
-          const o = JSON.parse(String(row.operation_json)) as Operation;
-          if (
-            o.phase !== "complete" ||
-            o.collection !== name ||
-            o.store !== f.vector_store_id ||
-            o.path !== f.path ||
-            o.version !== f.version ||
-            o.sha256 !== f.sha256 ||
-            o.file_id !== f.file_id ||
-            o.source_commit !== f.source_commit ||
-            f.operation_id.includes(".retired.")
-          )
-            conflict();
+          )[0]!;
+          const ready = Number(row.phase === "complete");
+          total++;
+          completed += ready;
+          const attributes = {
+            repository: ownership.collections[name]!.repository,
+            path: f.path,
+            commit: f.source_commit,
+            kind: f.kind,
+            collection: name,
+            branch: ownership.collections[name]!.branch ?? "unspecified",
+            sha256: f.sha256,
+            operation_id: f.operation_id,
+          };
+          this.storage.sql.exec(
+            "INSERT INTO ingest_job_files VALUES(?,?,?,?,?,?)",
+            w,
+            f.file_id,
+            f.operation_id,
+            f.vector_store_id,
+            canonical(attributes),
+            ready,
+          );
+        }
+      this.storage.sql.exec(
+        `INSERT OR REPLACE INTO ingest_jobs(workspace,id,status,owner,epoch,revision,manifest_json,binding_json,created_at,next_at,total,completed)
+        VALUES(?,?,'pending',?,?,?,?,?,?,?,?,?)`,
+        w,
+        id,
+        i.key,
+        v.epoch,
+        v.expected_revision + 1,
+        v.manifestText,
+        canonical(binding),
+        now,
+        now,
+        total,
+        completed,
+      );
+      return { job_id: id };
+    });
+  }
+  nextJobTime(): number | null {
+    const r = this.rows(
+      "SELECT MIN(next_at) AS next FROM ingest_jobs WHERE status='pending'",
+    )[0];
+    return r?.next === null || r?.next === undefined ? null : Number(r.next);
+  }
+  private validJob(job: BackgroundJob) {
+    this.gate.checkAuthority();
+    const r = this.rows(
+      "SELECT * FROM ingest_jobs WHERE workspace=?",
+      job.workspace,
+    )[0];
+    if (
+      !r ||
+      r.id !== job.id ||
+      r.status !== "pending" ||
+      r.epoch !== job.epoch ||
+      r.revision !== job.revision
+    )
+      return null;
+    const a = this.authority(job.workspace);
+    if (!a.enabled || !this.permits(String(r.owner), job.workspace)) {
+      this.invalidateJob(job.workspace, "revoked");
+      return null;
+    }
+    if (
+      a.epoch !== job.epoch ||
+      a.revision !== job.revision ||
+      a.binding_json !== r.binding_json
+    ) {
+      this.invalidateJob(job.workspace, "superseded");
+      return null;
+    }
+    if (Number(a.lease_expires) > Date.now()) return null;
+    return r;
+  }
+  dueJob(): BackgroundJob | null {
+    return this.storage.transactionSync(() => {
+      this.gate.checkAuthority();
+      const r = this.rows(
+        "SELECT * FROM ingest_jobs WHERE status='pending' AND next_at<=? ORDER BY next_at,workspace LIMIT 1",
+        Date.now(),
+      )[0];
+      if (!r) return null;
+      const w = String(r.workspace),
+        a = this.authority(w);
+      if (!a.enabled || !this.permits(String(r.owner), w)) {
+        this.invalidateJob(w, "revoked");
+        return null;
+      }
+      if (
+        a.epoch !== r.epoch ||
+        a.revision !== r.revision ||
+        a.binding_json !== r.binding_json
+      ) {
+        this.invalidateJob(w, "superseded");
+        return null;
+      }
+      if (Number(r.created_at) + 86400000 <= Date.now()) {
+        this.storage.sql.exec(
+          "UPDATE ingest_jobs SET status='failed',error='finalization_timeout',next_at=0 WHERE workspace=?",
+          w,
+        );
+        return null;
+      }
+      if (Number(a.lease_expires) > Date.now()) {
+        this.storage.sql.exec(
+          "UPDATE ingest_jobs SET next_at=? WHERE workspace=?",
+          Math.min(Number(a.lease_expires) + 1, Date.now() + 5000),
+          w,
+        );
+        return null;
+      }
+      const binding = JSON.parse(String(r.binding_json)) as OpenAIBinding;
+      const stores = Object.keys(binding.stores)
+        .sort()
+        .map((k) => binding.stores[k]!);
+      let index = Number(r.store_index),
+        after = r.cursor === null ? null : String(r.cursor),
+        cursors = JSON.parse(String(r.cursors_json)) as string[];
+      for (let n = 0; n < stores.length; n++) {
+        if (
+          this.rows(
+            "SELECT 1 FROM ingest_job_files WHERE workspace=? AND store=? AND ready=0 LIMIT 1",
+            w,
+            stores[index]!,
+          )[0]
+        )
+          break;
+        index = (index + 1) % stores.length;
+        after = null;
+        cursors = [];
+      }
+      return {
+        workspace: w,
+        id: String(r.id),
+        owner: String(r.owner),
+        epoch: Number(r.epoch),
+        revision: Number(r.revision),
+        binding,
+        store: stores[index]!,
+        storeIndex: index,
+        after,
+        cursors,
+        attempts: Number(r.attempts),
+      };
+    });
+  }
+  completeReadyJob(job: BackgroundJob): boolean {
+    return this.storage.transactionSync(() => {
+      const r = this.validJob(job);
+      if (!r) return true;
+      if (
+        this.rows(
+          "SELECT 1 FROM ingest_job_files WHERE workspace=? AND ready=0 LIMIT 1",
+          job.workspace,
+        )[0]
+      )
+        return false;
+      this.finishJob(job, String(r.manifest_json));
+      return true;
+    });
+  }
+  private finishJob(job: BackgroundJob, text: string) {
+    const { manifest, binding } = this.validatedManifest(job.workspace, text, [
+      "attached",
+      "complete",
+    ]);
+    for (const c of Object.values(manifest.collections))
+      for (const f of Object.values(c.files)) {
+        const row = this.rows(
+          "SELECT operation_json FROM ingest_operations WHERE workspace=? AND id=?",
+          job.workspace,
+          f.operation_id,
+        )[0]!;
+        const operation = JSON.parse(String(row.operation_json)) as Operation;
+        if (operation.phase === "attached") {
+          operation.phase = "complete";
+          this.storage.sql.exec(
+            "UPDATE ingest_operations SET phase='complete',operation_json=? WHERE workspace=? AND id=?",
+            JSON.stringify(operation),
+            job.workspace,
+            f.operation_id,
+          );
         }
       }
-      const published = this.gate.importManaged(w, manifest, binding);
-      this.storage.sql.exec("DELETE FROM ingest_active WHERE workspace=?", w);
-      for (const c of Object.values(manifest.collections))
-        for (const f of Object.values(c.files))
+    this.installPublication(job.workspace, manifest, binding);
+    this.storage.sql.exec(
+      "UPDATE ingest_authorities SET revision=revision+1 WHERE workspace=?",
+      job.workspace,
+    );
+    this.storage.sql.exec(
+      "UPDATE ingest_jobs SET status='complete',completed=total,publication_id=?,revision=revision+1,next_at=0,error=NULL,manifest_json='' WHERE workspace=?",
+      manifest.publication_id,
+      job.workspace,
+    );
+    this.storage.sql.exec(
+      "DELETE FROM ingest_job_files WHERE workspace=?",
+      job.workspace,
+    );
+  }
+  applyJobPage(job: BackgroundJob, page: ProviderFilePage) {
+    this.storage.transactionSync(() => {
+      const r = this.validJob(job);
+      if (!r) return;
+      for (const f of page.data) {
+        const expected = this.rows(
+          "SELECT * FROM ingest_job_files WHERE workspace=? AND file_id=?",
+          job.workspace,
+          f.id,
+        )[0];
+        if (!expected || expected.ready) continue;
+        const attributes = JSON.parse(
+          String(expected.attributes_json),
+        ) as Record<string, unknown>;
+        if (
+          expected.store !== job.store ||
+          !f.attributes ||
+          Object.entries(attributes).some(([k, v]) => f.attributes![k] !== v)
+        )
+          throw new BackgroundFailure("provider_metadata");
+        if (f.status === "failed" || f.status === "cancelled")
+          throw new BackgroundFailure("ingestion_failed", f.id);
+        if (f.status === "completed")
           this.storage.sql.exec(
-            "INSERT INTO ingest_active VALUES(?,?,?)",
-            w,
-            f.operation_id,
-            f.file_id,
+            "UPDATE ingest_job_files SET ready=1 WHERE workspace=? AND file_id=?",
+            job.workspace,
+            f.id,
           );
-      return { generation: published.generation };
+      }
+      const completed = Number(
+        this.rows(
+          "SELECT COUNT(*) AS n FROM ingest_job_files WHERE workspace=? AND ready=1",
+          job.workspace,
+        )[0]!.n,
+      );
+      if (completed === Number(r.total)) {
+        this.finishJob(job, String(r.manifest_json));
+        return;
+      }
+      const stores = Object.keys(job.binding.stores).length;
+      const next = page.has_more ? page.last_id! : null;
+      if (
+        next &&
+        (next === job.after ||
+          job.cursors.includes(next) ||
+          job.cursors.length >= 1000)
+      )
+        throw new BackgroundFailure("provider_pagination");
+      this.storage.sql.exec(
+        "UPDATE ingest_authorities SET revision=revision+1 WHERE workspace=?",
+        job.workspace,
+      );
+      this.storage.sql.exec(
+        "UPDATE ingest_jobs SET revision=revision+1,completed=?,store_index=?,cursor=?,cursors_json=?,next_at=?,attempts=0,error=NULL WHERE workspace=?",
+        completed,
+        page.has_more ? job.storeIndex : (job.storeIndex + 1) % stores,
+        next,
+        JSON.stringify(next ? [...job.cursors, next] : []),
+        Date.now() + (page.has_more ? 1000 : 30000),
+        job.workspace,
+      );
+    });
+  }
+  failJob(job: BackgroundJob, code: string, retry: boolean, fileId?: string) {
+    this.storage.transactionSync(() => {
+      if (!this.validJob(job)) return;
+      if (fileId) {
+        const owned = this.rows(
+          "SELECT operation_id FROM ingest_job_files WHERE workspace=? AND file_id=?",
+          job.workspace,
+          fileId,
+        )[0];
+        if (owned) {
+          const row = this.rows(
+            "SELECT operation_json FROM ingest_operations WHERE workspace=? AND id=?",
+            job.workspace,
+            owned.operation_id!,
+          )[0]!;
+          const operation = JSON.parse(String(row.operation_json)) as Operation;
+          if (operation.phase === "attached") {
+            operation.phase = "ingestion_failed";
+            operation.terminal_failure = true;
+            this.storage.sql.exec(
+              "UPDATE ingest_operations SET phase=?,operation_json=? WHERE workspace=? AND id=?",
+              operation.phase,
+              JSON.stringify(operation),
+              job.workspace,
+              owned.operation_id!,
+            );
+          }
+        }
+      }
+      this.storage.sql.exec(
+        "UPDATE ingest_authorities SET revision=revision+1 WHERE workspace=?",
+        job.workspace,
+      );
+      this.storage.sql.exec(
+        "UPDATE ingest_jobs SET status=?,revision=revision+1,error=?,attempts=attempts+1,next_at=? WHERE workspace=?",
+        retry ? "pending" : "failed",
+        code,
+        retry
+          ? Date.now() +
+              Math.min(900000, 30000 * 2 ** Math.min(job.attempts, 5))
+          : 0,
+        job.workspace,
+      );
     });
   }
 }

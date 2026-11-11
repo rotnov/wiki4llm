@@ -83,6 +83,17 @@ class Bridge(httpx.BaseTransport):
         assert self.process.wait(timeout=20) == 0
         self.directory.cleanup()
 
+    def complete(self, provider):
+        result = self.exchange(
+            {"control": "complete", "files": list(provider.attachments.values())}
+        )
+        jobs = json.loads(base64.b64decode(result["body"]))
+        assert jobs and all(j["status"] == "complete" for j in jobs), jobs
+
+    def tick(self, provider):
+        result = self.exchange({"control": "tick", "files": list(provider.attachments.values())})
+        return json.loads(base64.b64decode(result["body"]))
+
 
 @pytest.fixture
 def bridge(monkeypatch):
@@ -147,16 +158,24 @@ def test_real_workerd_ephemeral_recovery_and_retirement(tmp_path, repo, bridge):
     bridge.exchange({"control": "restart"})
     bridge.lose = "/checkpoint"
     initial = invoke()
+    assert initial["mode"] == "submitted" and "publication_id" not in initial
+    bridge.exchange({"control": "restart"})
+    bridge.complete(provider)
     before = provider.uploads
     noop = invoke()
-    assert initial["publication_id"] == noop["publication_id"] and provider.uploads == before == 1
+    assert noop["mode"] == "applied" and provider.uploads == before == 1
+    assert invoke()["publication_id"] == noop["publication_id"]
     tracked(repo, "a.md", "second")
     git(repo, "commit", "-m", "second")
-    bridge.lose = "/publish"
+    bridge.lose = "/submit"
+    invoke()
+    bridge.complete(provider)
     invoke()
     assert provider.uploads == 2 and set(provider.files) == {"file-2"}
     git(repo, "mv", "a.md", "renamed.md")
     git(repo, "commit", "-m", "rename")
+    invoke()
+    bridge.complete(provider)
     invoke()
     assert set(provider.files) == {"file-3"}
     # Revert content/path: old operation must retire atomically, never reactivate old file.
@@ -164,9 +183,13 @@ def test_real_workerd_ephemeral_recovery_and_retirement(tmp_path, repo, bridge):
     tracked(repo, "a.md", "hello\n")
     git(repo, "commit", "-m", "restore first")
     invoke()
+    bridge.complete(provider)
+    invoke()
     assert set(provider.files) == {"file-4"}
     git(repo, "rm", "a.md")
     git(repo, "commit", "-m", "delete")
+    invoke()
+    bridge.complete(provider)
     invoke()
     assert not provider.files
     assert len(list(tmp_path.glob("runner-*"))) == runs[0]
@@ -220,17 +243,31 @@ def test_real_workerd_takeover_stale_attempt_and_late_effect(tmp_path, repo, bri
         next_cfg = fresh_checkout(cfg, repo, tmp_path / "successor")
         provider.upload = upload
         with RemoteState(next_cfg, transport=bridge) as successor:
-            # Publication commits, but absent evidence cannot clear old ownership.
-            with pytest.raises(RagError, match="publication committed.*unresolved upload"):
+            # New asynchronous submission cannot discard unresolved older ownership.
+            with pytest.raises(RagError, match="unresolved upload"):
                 run(next_cfg, "index", apply=True, provider=provider, remote=successor)
-            publication.append(successor.publication())
+            assert successor.publication() is None
+            from wiki_rag.engine import empty_manifest
+
+            candidate = empty_manifest(next_cfg)
+            candidate.update(generation=1, published_at="2026-01-01T00:00:00+00:00")
+            candidate["collections"] = {
+                "guide": {
+                    **next_cfg.collections[0].binding(),
+                    "repository_commit": git(repo, "rev-parse", "HEAD"),
+                    "processing": next_cfg.processing,
+                    "files": {},
+                }
+            }
+            publication.append(candidate)
             pending = [item for page in successor.cleanup_pages() for item in page]
-            assert len(pending) == 1
-            assert pending[0]["operation"]["phase"] == "upload_pending"
-            assert pending[0]["operation"]["filename"] == filename
-            assert "file_id" not in pending[0]["operation"]
+            old = next(
+                item["operation"] for item in pending if item["operation"]["filename"] == filename
+            )
+            assert old["phase"] == "upload_pending"
+            assert "file_id" not in old
             assert set(provider.files) == {"file-2"} and fid not in provider.files
-            ordering.append("successor-published-effect-absent")
+            ordering.append("successor-fenced-effect-absent")
         return fid  # Old response cannot checkpoint into the successor epoch.
 
     provider.upload = delayed_upload
@@ -258,21 +295,28 @@ def test_real_workerd_takeover_stale_attempt_and_late_effect(tmp_path, repo, bri
 
     absent_cfg = fresh_checkout(cfg, repo, tmp_path / "absent-retry")
     with RemoteState(absent_cfg, transport=bridge) as remote:
-        with pytest.raises(RagError, match="publication committed.*unresolved upload"):
+        with pytest.raises(RagError, match="unresolved upload"):
             run(absent_cfg, "index", apply=True, provider=provider, remote=remote)
-        assert remote.publication() == publication[0]
-        assert len([item for page in remote.cleanup_pages() for item in page]) == 1
-    delayed_effects[0]()  # Actual provider mutation arrives after the new publication.
+        assert remote.publication() is None
+        assert any(
+            item["operation"]["phase"] == "upload_pending"
+            for page in remote.cleanup_pages()
+            for item in page
+        )
+    delayed_effects[0]()  # Late provider mutation arrives after the newer fenced attempt.
     assert set(provider.files) == {"file-1", "file-2"}
     final_cfg = fresh_checkout(cfg, repo, tmp_path / "arrival-cleanup")
     with RemoteState(final_cfg, transport=bridge) as remote:
         result = run(final_cfg, "index", apply=True, provider=provider, remote=remote)
-        assert remote.publication() == publication[0]
+        assert result["mode"] == "submitted" and remote.publication() is None
+    bridge.complete(provider)
+    with RemoteState(final_cfg, transport=bridge) as remote:
+        result = run(final_cfg, "index", apply=True, provider=provider, remote=remote)
+        assert result["publication_id"] == remote.publication()["publication_id"]
         assert list(remote.cleanup_pages()) == [[]]
-        assert result["publication_id"] == publication[0]["publication_id"]
     assert ordering == [
         "old-request-dispatched",
-        "successor-published-effect-absent",
+        "successor-fenced-effect-absent",
         "stale-checkpoint-and-publish-rejected",
         "old-effect-visible",
     ]
@@ -291,6 +335,8 @@ def test_real_workerd_delayed_old_delete_cannot_target_replacement_attempt(tmp_p
     first_cfg = fresh_checkout(cfg, repo, tmp_path / "first-runner")
     with RemoteState(first_cfg, transport=bridge) as remote:
         run(first_cfg, "index", apply=True, provider=provider, remote=remote)
+    bridge.complete(provider)
+    with RemoteState(first_cfg, transport=bridge) as remote:
         old = remote.publication()["collections"]["guide"]["files"]["a.md"]
 
     def delay_old_delete(fid):
@@ -303,7 +349,10 @@ def test_real_workerd_delayed_old_delete_cannot_target_replacement_attempt(tmp_p
     git(repo, "commit", "-m", "replacement")
     replacement_cfg = fresh_checkout(cfg, repo, tmp_path / "replacement-runner")
     with RemoteState(replacement_cfg, transport=bridge) as remote:
-        with pytest.raises(RagError, match="publication committed.*delayed delete"):
+        run(replacement_cfg, "index", apply=True, provider=provider, remote=remote)
+    bridge.complete(provider)
+    with RemoteState(replacement_cfg, transport=bridge) as remote:
+        with pytest.raises(RagError, match="delayed delete"):
             run(replacement_cfg, "index", apply=True, provider=provider, remote=remote)
         assert (
             remote.lookup([old["operation_id"]])[old["operation_id"]]["phase"]
@@ -317,6 +366,9 @@ def test_real_workerd_delayed_old_delete_cannot_target_replacement_attempt(tmp_p
     tracked(repo, "a.md", "hello\n")
     git(repo, "commit", "-m", "restore first version")
     restored_cfg = fresh_checkout(cfg, repo, tmp_path / "restored-runner")
+    with RemoteState(restored_cfg, transport=bridge) as remote:
+        run(restored_cfg, "index", apply=True, provider=provider, remote=remote)
+    bridge.complete(provider)
     with RemoteState(restored_cfg, transport=bridge) as remote:
         run(restored_cfg, "index", apply=True, provider=provider, remote=remote)
         published = remote.publication()
@@ -365,3 +417,53 @@ def test_real_workerd_concurrent_initial_holders_and_lease_free_preview(tmp_path
     finally:
         first.finish(suppress=True)
         second.finish(suppress=True)
+
+
+def test_real_workerd_background_pagination_survives_restart(tmp_path, repo, bridge):
+    for n in range(101):
+        tracked(repo, f"doc-{n}.md", f"Document {n}\n")
+    git(repo, "commit", "-m", "documents")
+    cfg = remote_config(tmp_path, repo)
+    provision(bridge, cfg)
+    provider = FakeProvider()
+    with RemoteState(cfg, transport=bridge) as remote:
+        result = run(cfg, "index", apply=True, provider=provider, remote=remote)
+        assert result["mode"] == "submitted" and remote.publication() is None
+    jobs = bridge.tick(provider)
+    assert jobs[0]["status"] == "pending" and jobs[0]["completed"] == 100
+    bridge.exchange({"control": "restart"})
+    bridge.complete(provider)
+    with RemoteState(cfg, transport=bridge) as remote:
+        result = run(cfg, "index", apply=True, provider=provider, remote=remote)
+        assert result["mode"] == "applied"
+        assert len(remote.publication()["collections"]["guide"]["files"]) == 101
+    assert provider.uploads == 101
+
+
+def test_real_workerd_background_failure_preserves_prior_and_recovers(tmp_path, repo, bridge):
+    tracked(repo, "a.md", "first")
+    git(repo, "commit", "-m", "first")
+    cfg = remote_config(tmp_path, repo)
+    provision(bridge, cfg)
+    provider = FakeProvider()
+    with RemoteState(cfg, transport=bridge) as remote:
+        run(cfg, "index", apply=True, provider=provider, remote=remote)
+    bridge.complete(provider)
+    with RemoteState(cfg, transport=bridge) as remote:
+        prior = remote.publication()
+    tracked(repo, "a.md", "second")
+    git(repo, "commit", "-m", "second")
+    with RemoteState(cfg, transport=bridge) as remote:
+        run(cfg, "index", apply=True, provider=provider, remote=remote)
+    provider.attachments["vs_test", "file-2"]["status"] = "failed"
+    assert bridge.tick(provider)[0]["status"] == "failed"
+    with RemoteState(cfg, transport=bridge) as remote:
+        assert remote.publication() == prior
+        assert (
+            run(cfg, "index", apply=True, provider=provider, remote=remote)["mode"] == "submitted"
+        )
+    bridge.complete(provider)
+    with RemoteState(cfg, transport=bridge) as remote:
+        run(cfg, "index", apply=True, provider=provider, remote=remote)
+        assert remote.publication() != prior
+    assert provider.uploads == 3 and set(provider.files) == {"file-3"}

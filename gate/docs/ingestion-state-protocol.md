@@ -3,7 +3,8 @@
 The Cloudflare gateway's fixed `authority-v1` Durable Object is the authority for
 remote ingestion. This protocol is separate from the five public read-only MCP
 tools and from the Python CLI's legacy local `state.json` checksum. The server
-implementation is `src/cloudflare/ingestion.ts`; HTTP admission is in `worker.ts`.
+implementation is `src/cloudflare/ingestion.ts`; HTTP admission is in `worker.ts`,
+and asynchronous provider checks are in `background.ts`.
 All examples below use synthetic identifiers. No document bodies or credentials
 belong in this journal.
 
@@ -34,9 +35,9 @@ whether an external provider write succeeded from an HTTP error here.
 
 Bodies have a 30-second streaming deadline. At most four small administrative or
 publisher requests are reading bodies concurrently. Manual import and ingestion
-publish share one large-body slot. No transaction is held while awaiting bodies or
+publish and submit share one large-body slot. No transaction is held while awaiting bodies or
 network calls. Small publisher bodies are at most 512 KiB; admin provisioning is
-at most 128 KiB; publish wrappers are at most 17 MiB.
+at most 128 KiB; publish and submit wrappers are at most 17 MiB.
 
 ## Administrator provisioning
 
@@ -292,9 +293,76 @@ checkpoint/renewal or an expired monotonic deadline stops further provider calls
 After committed publication, cleanup failures are still fatal to the attempt;
 report the committed publication separately and use a fresh attempt for cleanup.
 
-Source cleanliness, full Git history/forward ancestry, rescan before publish,
+Source cleanliness, full Git history/forward ancestry, rescan before submit/publish,
 empty-store verification and provider outcome reconciliation are client duties.
 The server never receives document bodies or repository checkouts. It cannot
 independently verify those facts. No legacy adoption or history-compaction API is
 included in v1. Deployments, credential setup and GHA activation are separate
 operator actions.
+
+## Asynchronous submission extension
+
+`GET /ingest/{workspace}/status` and fenced snapshots advertise
+`features: ["async-submit-v1"]` and `job: null` or the latest job metadata.
+New clients require this capability before any provider writes. The existing
+per-file operation phases, leases, ownership and synchronous publish endpoint
+remain compatible with older clients.
+
+`POST /ingest/{workspace}/submit` takes the same fenced command envelope and
+`manifestText` as publish. It validates the complete captured manifest, immutable
+collection bindings, publication ordering and every referenced operation. Only
+`attached` and `complete` operations are eligible; file IDs, versions, digests,
+paths and original source revisions must match. The receipt contains `revision`
+and a UUID `job_id`. A lost response is replayed with the same request ID and body.
+The command records the exact manifest, submitting publisher, binding, epoch,
+revision and per-file readiness in SQLite. It never receives an OpenAI key.
+
+Submission does not publish or poll OpenAI. The CLI releases its lease and the GHA
+job exits with `mode: submitted`; that is acceptance, not index completion.
+An already-current snapshot returns `mode: applied` with its stable publication
+ID and creates no new job. The publisher status command reports:
+
+```json
+{
+  "job": {
+    "id": "00000000-0000-4000-8000-000000000000",
+    "status": "pending",
+    "total": 281,
+    "completed": 200
+  }
+}
+```
+
+Statuses are `pending`, `complete`, `failed`, `superseded` and `revoked`.
+Failures carry a sanitized `error` code; completion carries `publication_id`.
+Only the latest job is retained per workspace. A subsequent submission replaces
+that job's candidate manifest and readiness rows; immutable file ownership remains.
+
+The Durable Object pre-arms its alarm before committing a submission, and re-arms
+before provider work. Replays repair scheduling. One alarm multiplexes jobs by
+their durable next-run time. Each invocation processes at most one provider page
+of 100 files, with a 512 KiB response limit and 10-second fetch deadline. Pagination
+cursors/readiness survive restarts; completed pages advance promptly and pending
+indexing is checked again after 30 seconds. Retryable transport/429/5xx failures
+back off to at most 15 minutes. Jobs expire after 24 hours instead of polling forever.
+
+The alarm uses the existing project query credential only for fixed-origin GETs.
+Provider IDs, status, pagination and each owned file's original attributes are
+validated. No fabricated Access identity or extended CI JWT is used: the server
+executes a bounded delegation accepted from the submitting publisher. Before
+applying each result, it transactionally rechecks job identity, authority binding,
+epoch, revision, enablement and publisher grants. A new writer lease or subsequent
+same-lease journal mutation supersedes pending work. Revocation or disablement
+permanently revokes the job, including across later re-enablement. Network waits
+never hold a SQLite transaction.
+
+After all files are verified complete, operation completion receipts, the captured
+manifest publication and job completion commit atomically. An error, stale result
+or incomplete batch leaves the prior publication active. Background completion
+advances the authority/job revision; it never uploads, attaches or deletes files.
+Terminal provider failures mark the affected owned operation for the existing
+bounded publisher recovery path. Provider cleanup stays with the next publisher
+sync/no-op, whose write credential can retire obsolete owned resources. Selected
+unpublished operation IDs are retained during that cleanup so interrupted uploads
+can resume. Cleanup uncertainty before a new submission preserves the old
+publication and fails the attempt explicitly.
