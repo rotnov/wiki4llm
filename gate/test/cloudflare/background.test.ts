@@ -420,3 +420,22 @@ test("terminal indexing failure and metadata mismatch never publish", async () =
     }
   }
 });
+
+test("metadata failure names the field and state without leaking its value", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    await f.release();
+    f.setState("completed");
+    (f.files[0]!.attributes as Record<string, unknown>).commit =
+      "private-value-must-not-be-logged";
+    await f.tick();
+    const status = await f.status();
+    assert.equal(status.job.status, "failed");
+    assert.equal(status.publication, null);
+    assert.equal(status.job.error, "provider_metadata_commit_completed");
+    assert.ok(!JSON.stringify(status.job).includes("private-value"));
+  } finally {
+    await f.mf.dispose();
+  }
+});

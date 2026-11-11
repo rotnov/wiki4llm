@@ -1082,12 +1082,17 @@ export class IngestionState {
         const attributes = JSON.parse(
           String(expected.attributes_json),
         ) as Record<string, unknown>;
-        if (
-          expected.store !== job.store ||
-          !f.attributes ||
-          Object.entries(attributes).some(([k, v]) => f.attributes![k] !== v)
-        )
-          throw new BackgroundFailure("provider_metadata");
+        if (expected.store !== job.store)
+          throw new BackgroundFailure("provider_metadata_store");
+        if (!f.attributes)
+          throw new BackgroundFailure(`provider_metadata_absent_${f.status}`);
+        const mismatch = Object.entries(attributes).find(
+          ([k, v]) => f.attributes![k] !== v,
+        );
+        if (mismatch)
+          throw new BackgroundFailure(
+            `provider_metadata_${mismatch[0]}_${f.status}`,
+          );
         if (f.status === "failed" || f.status === "cancelled")
           throw new BackgroundFailure("ingestion_failed", f.id);
         if (f.status === "completed")
