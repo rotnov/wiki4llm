@@ -51,6 +51,53 @@ def patterns(value):
 
 
 @dataclass(frozen=True)
+class Generator:
+    name: str
+    path: str
+    command: tuple[str, ...]
+    inputs: tuple[str, ...]
+
+
+def generators(value):
+    if not isinstance(value, list) or len(value) > 8:
+        raise RagError("generators must be a list of at most eight recipes")
+    result = []
+    for item in value:
+        keys(item, {"name", "path", "command", "inputs"}, {"name", "path", "command", "inputs"})
+        name = string(item["name"], r"[a-z0-9]+(?:-[a-z0-9]+)*")
+        if len(name) > 80:
+            raise RagError("generator name is too long")
+        path = string(item["path"])
+        if (
+            path.startswith("/")
+            or any(p in {"", ".", "..", ".git"} for p in path.split("/"))
+            or re.search(r"[\\%:#*?\[\]\x00-\x1f\x7f]", path)
+        ):
+            raise RagError("generator path must be a normalized literal relative path")
+        command = item["command"]
+        if (
+            not isinstance(command, list)
+            or not 2 <= len(command) <= 64
+            or not all(
+                isinstance(a, str) and a and len(a) <= 16384 and "\0" not in a for a in command
+            )
+            or command.count("{output}") != 1
+        ):
+            raise RagError("generator command requires argv with exactly one {output} argument")
+        inputs = patterns(item["inputs"])
+        if not inputs or any(
+            g.name == name
+            or path == g.path
+            or path.startswith(g.path + "/")
+            or g.path.startswith(path + "/")
+            for g in result
+        ):
+            raise RagError("generator inputs must be nonempty and output roots disjoint")
+        result.append(Generator(name, path, tuple(command), inputs))
+    return tuple(result)
+
+
+@dataclass(frozen=True)
 class Collection:
     name: str
     repository: str
@@ -60,6 +107,8 @@ class Collection:
     include: tuple[str, ...]
     exclude: tuple[str, ...]
     extensions: tuple[str, ...] | None
+    lfs: bool = False
+    generators: tuple[Generator, ...] = ()
 
     def binding(self):
         return {
@@ -91,6 +140,7 @@ class Config:
     chunk_overlap: int
 
     remote_state: RemoteConfig | None = None
+    prepared: dict | None = None
 
     @property
     def processing(self):
@@ -206,12 +256,16 @@ def config_from_mapping(raw, path):
                 "include",
                 "exclude",
                 "extensions",
+                "lfs",
+                "generators",
             },
             {"name", "repository", "root", "vector_store_id", "include"},
         )
         ext = patterns(item["extensions"]) if "extensions" in item else None
         if ext is not None and (not ext or any(not re.fullmatch(r"\.[a-z0-9]+", e) for e in ext)):
             raise RagError("extensions require lowercase dotted suffixes")
+        if type(item.get("lfs", False)) is not bool:
+            raise RagError("lfs must be a boolean")
         collections.append(
             Collection(
                 string(item["name"], r"[a-zA-Z0-9_-]+"),
@@ -222,6 +276,8 @@ def config_from_mapping(raw, path):
                 patterns(item["include"]),
                 patterns(item.get("exclude", [])),
                 ext,
+                item.get("lfs", False),
+                generators(item.get("generators", [])),
             )
         )
     if len({c.name for c in collections}) != len(collections):

@@ -37,6 +37,7 @@ def attributes(collection, file, oid, op):
         "branch": collection.branch or "unspecified",
         "sha256": file.sha256,
         "operation_id": oid,
+        **({"source_kind": op["origin"]["kind"]} if op.get("origin") else {}),
     }
 
 
@@ -90,6 +91,7 @@ def stage_files(cfg, state, selected, provider):
                         "version": file.version,
                         "source_commit": file.source_commit,
                         "ingestion_attempts": attempts,
+                        **({"origin": file.origin} if file.origin else {}),
                     }
                     ops[oid] = op
                     new.append(oid)
@@ -217,5 +219,6 @@ def stage_files(cfg, state, selected, provider):
             "source_commit": op["source_commit"],
             "preprocessing": file.preprocessing,
             "operation_id": oid,
+            **({"origin": op["origin"]} if op.get("origin") else {}),
         }
     return entries

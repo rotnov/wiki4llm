@@ -467,3 +467,42 @@ def test_real_workerd_background_failure_preserves_prior_and_recovers(tmp_path, 
         run(cfg, "index", apply=True, provider=provider, remote=remote)
         assert remote.publication() != prior
     assert provider.uploads == 3 and set(provider.files) == {"file-3"}
+
+
+def test_real_workerd_mixed_derived_origins_are_immutable_and_background_verified(
+    tmp_path, repo, bridge
+):
+    from test_derived_sources import PDF, SCRIPT, configured, pointer
+
+    tracked(repo, "input.md", "documentation")
+    tracked(repo, "generate.py", SCRIPT)
+    tracked(repo, "paper.pdf", pointer())
+    git(repo, "commit", "-m", "derived sources")
+    (repo / "paper.pdf").write_bytes(PDF)
+    cfg = configured(tmp_path, repo, lfs=True, script=SCRIPT)
+    provision(bridge, cfg)
+    provider = FakeProvider()
+    remote = RemoteState(cfg, transport=bridge)
+    try:
+        result = run(cfg, "index", apply=True, provider=provider, remote=remote)
+        assert result["mode"] == "submitted"
+        rows = remote.operations(after="", limit=100)["items"]
+        generated = next(
+            x for x in rows if x["operation"].get("origin", {}).get("kind") == "generated"
+        )
+        corrupted = json.loads(json.dumps(generated["operation"]))
+        corrupted["origin"]["inputs_sha256"] = "f" * 64
+        with pytest.raises(RagError, match="409"):
+            remote.checkpoint(generated["id"], corrupted)
+    finally:
+        remote.finish(suppress=True)
+    bridge.exchange({"control": "restart", "expire": True})
+    bridge.complete(provider)
+    with RemoteState(cfg, transport=bridge) as remote:
+        manifest = remote.publication()
+        files = manifest["collections"]["guide"]["files"]
+        assert files["paper.pdf"]["origin"]["kind"] == "git-lfs"
+        assert files["docs/llm/api/api.md"]["origin"]["kind"] == "generated"
+        assert "origin" not in files["input.md"]
+        assert run(cfg, "index", apply=True, provider=provider, remote=remote)["mode"] == "applied"
+    assert provider.uploads == 3

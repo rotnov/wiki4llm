@@ -118,6 +118,7 @@ class SourceFile:
     kind: str
     source_commit: str | None
     preprocessing: str
+    origin: dict | None = None
 
 
 @dataclass
@@ -125,15 +126,65 @@ class Snapshot:
     files: dict[str, SourceFile]
     skipped: list[dict]
     commit: str | None
+    prepared_identity: str | None = None
 
     @property
     def fingerprint(self):
         return stable_hash(
-            {"commit": self.commit, "files": {p: f.version for p, f in self.files.items()}}
+            {
+                "commit": self.commit,
+                "files": {p: f.version for p, f in self.files.items()},
+                **({"prepared": self.prepared_identity} if self.prepared_identity else {}),
+            }
         )
 
 
+def content_reason(path, data):
+    if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
+        return "lfs"
+    if SECRET_CONTENT.search(data):
+        return "secret"
+    if Path(path).suffix.lower() == ".pdf":
+        if not re.match(rb"%PDF-(?:1\.[0-7]|2\.0)(?:\r|\n)", data) or not data[
+            -1024:
+        ].rstrip().endswith(b"%%EOF"):
+            return "invalid PDF"
+    elif b"\0" in data:
+        return "binary"
+    elif Path(path).suffix.lower() not in TEXT_SUFFIXES:
+        return "unsupported format"
+    else:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            return "binary"
+    return None
+
+
+def source_file(cfg, relative, data, commit, origin=None):
+    from .origins import validate_origin
+
+    preprocessing = "pdf-native-v1" if Path(relative).suffix.lower() == ".pdf" else "utf8-text-v1"
+    processing = {**cfg.processing, "preprocessing": preprocessing}
+    if origin is not None:
+        validate_origin(origin)
+        processing["source_kind"] = origin["kind"]
+    sha = digest(data)
+    return SourceFile(
+        relative,
+        data,
+        sha,
+        stable_hash([sha, processing]),
+        Path(relative).suffix.lower()[1:],
+        commit,
+        preprocessing,
+        origin,
+    )
+
+
 def scan(cfg):
+    from .sources import generated_files, pointer
+
     snapshots = {}
     total = count = 0
     for collection in cfg.collections:
@@ -178,6 +229,7 @@ def scan(cfg):
             if staged != committed_index:
                 raise RagError("remote source Git index must match HEAD")
         files, skipped = {}, []
+        generated, prepared_identity = generated_files(cfg, collection, commit)
         for record in records:
             if not record:
                 continue
@@ -241,35 +293,43 @@ def scan(cfg):
                 continue
             if cfg.remote_state and re.search(r"[\\%:#\x00-\x1f\x7f]", relative):
                 raise RagError("invalid remote document path")
-            data = safe_read(root, relative, cfg.max_file_bytes)
+            derived = (
+                cfg.prepared["lfs"].get((collection.name, relative))
+                if collection.lfs and cfg.prepared
+                else None
+            )
+            read_limit = cfg.max_file_bytes
+            if derived and read_limit is not None:
+                read_limit = max(read_limit, len(derived["pointer"]))
+            data = safe_read(root, relative, read_limit)
             if data is None:
                 if cfg.remote_state:
                     raise RagError("selected committed source was removed")
                 skipped.append({"path": relative, "reason": "deleted from working tree"})
                 continue
+            origin = None
+            proof_data = data
+            if collection.lfs and cfg.prepared:
+                if derived:
+                    spec = pointer(derived["pointer"])
+                    if (
+                        derived["commit"] != commit
+                        or spec != derived["origin"]
+                        or data not in (derived["pointer"], derived["data"])
+                        or len(derived["data"]) != spec["size"]
+                        or digest(derived["data"]) != spec["oid"]
+                    ):
+                        raise RagError("LFS source changed after preparation")
+                    proof_data, data, origin = derived["pointer"], derived["data"], spec
+            if cfg.max_file_bytes is not None and len(data) > cfg.max_file_bytes:
+                raise RagError("selected file exceeds size limit")
+            algorithm = "sha256" if commit and len(commit) == 64 else "sha1"
+            raw_blob = f"blob {len(proof_data)}\0".encode() + proof_data
+            committed = hashlib.new(algorithm, raw_blob).hexdigest() == committed_blobs.get(encoded)
             if cfg.remote_state:
-                algorithm = "sha256" if len(commit) == 64 else "sha1"
-                raw_blob = f"blob {len(data)}\0".encode() + data
-                if hashlib.new(algorithm, raw_blob).hexdigest() != committed_blobs.get(encoded):
+                if not committed:
                     raise RagError("remote source requires literal HEAD blob bytes")
-            if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
-                reason = "lfs"
-            elif SECRET_CONTENT.search(data):
-                reason = "secret"
-            elif path.suffix.lower() == ".pdf":
-                if not re.match(rb"%PDF-(?:1\.[0-7]|2\.0)(?:\r|\n)", data):
-                    reason = "invalid PDF"
-                elif not data[-1024:].rstrip().endswith(b"%%EOF"):
-                    reason = "invalid PDF"
-            elif b"\0" in data:
-                reason = "binary"
-            elif path.suffix.lower() not in TEXT_SUFFIXES:
-                reason = "unsupported format"
-            else:
-                try:
-                    data.decode("utf-8")
-                except UnicodeDecodeError:
-                    reason = "binary"
+            reason = content_reason(relative, data)
             if reason:
                 skipped.append({"path": relative, "reason": reason})
                 continue
@@ -279,27 +339,36 @@ def scan(cfg):
                 cfg.max_files is not None and count > cfg.max_files
             ):
                 raise RagError("selection exceeds total size or file count limit")
-            preprocessing = "pdf-native-v1" if path.suffix.lower() == ".pdf" else "utf8-text-v1"
-            processing = {**cfg.processing, "preprocessing": preprocessing}
-            sha = digest(data)
-            blob = f"blob {len(data)}\0".encode() + data
-            algorithm = "sha256" if commit and len(commit) == 64 else "sha1"
-            committed = hashlib.new(algorithm, blob).hexdigest() == committed_blobs.get(encoded)
-            if cfg.remote_state and not committed:
-                raise RagError("remote source requires literal HEAD blob bytes")
             if cfg.remote_state and count > 10000:
                 raise RagError(
                     "remote manifest exceeds 10000 files (protocol limit; "
                     "unlimited selection does not remove it)"
                 )
-            files[relative] = SourceFile(
-                relative,
-                data,
-                sha,
-                stable_hash([sha, processing]),
-                path.suffix.lower()[1:],
-                commit if committed else None,
-                preprocessing,
+            files[relative] = source_file(
+                cfg, relative, data, commit if committed else None, origin
             )
-        snapshots[collection.name] = Snapshot(dict(sorted(files.items())), skipped, commit)
+        for relative, data, origin in generated:
+            if (
+                relative in files
+                or len(relative) > 512
+                or re.search(r"[\\%:#\x00-\x1f\x7f]", relative)
+            ):
+                raise RagError("generated path is invalid or collides with a tracked document")
+            reason = content_reason(relative, data)
+            if reason:
+                skipped.append({"path": relative, "reason": reason})
+                continue
+            total += len(data)
+            count += 1
+            if (
+                (cfg.max_total_bytes is not None and total > cfg.max_total_bytes)
+                or (cfg.max_files is not None and count > cfg.max_files)
+                or cfg.remote_state
+                and count > 10000
+            ):
+                raise RagError("selection exceeds total size or file count limit")
+            files[relative] = source_file(cfg, relative, data, commit, origin)
+        snapshots[collection.name] = Snapshot(
+            dict(sorted(files.items())), skipped, commit, prepared_identity
+        )
     return snapshots

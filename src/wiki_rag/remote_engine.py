@@ -58,6 +58,20 @@ def prospective_bounds(cfg, snapshots):
                     "source_commit": file.source_commit,
                     "preprocessing": file.preprocessing,
                     "operation_id": "0" * 64,
+                    **(
+                        {
+                            "origin": {
+                                **file.origin,
+                                **(
+                                    {"recipe": "x" * 80}
+                                    if file.origin["kind"] == "generated"
+                                    else {}
+                                ),
+                            }
+                        }
+                        if file.origin
+                        else {}
+                    ),
                 }
                 for path, file in snap.files.items()
             },
@@ -74,6 +88,8 @@ def cleanup_remote(cfg, state, provider, keep=()):
             oid, op = item["id"], item["operation"]
             if oid in keep:
                 continue
+            if "origin" in op and "file-origin-v1" not in state.get("features", []):
+                raise RagError("remote authority requires file-origin-v1 before derived cleanup")
             if op["phase"] == "upload_ready":
                 # No external intent was dispatched. Keep ownership; protocol v1
                 # has no tombstone transition for an unuploaded ready operation.
@@ -98,6 +114,15 @@ def cleanup_remote(cfg, state, provider, keep=()):
 
 
 def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
+    if (
+        command != "status"
+        and cfg.prepared is None
+        and any(c.lfs or c.generators for c in cfg.collections)
+    ):
+        from .sources import prepare_sources
+
+        with prepare_sources(cfg) as prepared:
+            return run_remote(prepared, command, apply=apply, provider=provider, remote=remote)
     owned = remote is None
     remote = remote or RemoteState(cfg)
     published = None
@@ -127,6 +152,11 @@ def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
         if command == "update" and not status["initialized"]:
             raise RagError("remote authority uninitialized; use index with fresh empty stores")
         before = remote.publication() or empty_manifest(cfg)
+        if any(c.lfs or c.generators for c in cfg.collections) or any(
+            f.get("origin") for c in before["collections"].values() for f in c["files"].values()
+        ):
+            if "file-origin-v1" not in features:
+                raise RagError("remote authority requires file-origin-v1 before derived mutations")
         snapshots = scan(cfg)
         prospective_bounds(cfg, snapshots)
         guard_commits(cfg, snapshots, before)
@@ -140,7 +170,7 @@ def run_remote(cfg, command, *, apply=False, provider=None, remote=None):
                     "initial remote index requires fresh empty vector stores; no legacy adoption"
                 )
             remote.command("initialize")
-        state = {"_remote": remote, "operations": OperationLookup(remote)}
+        state = {"_remote": remote, "operations": OperationLookup(remote), "features": features}
         result = plan(cfg, snapshots, before)
         selected = []
         keep = set()

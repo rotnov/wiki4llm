@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 from .config import RagError
+from .origins import validate_origin
 from .selection import stable_hash
 
 
@@ -74,6 +75,9 @@ def load_state(cfg):
             raise ValueError()
         if data["ownership"] != cfg.ownership:
             raise RagError("state ownership mismatch; restore original configuration")
+        for operation in data["operations"].values():
+            if "origin" in operation:
+                validate_origin(operation["origin"])
         return data
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise RagError("invalid or corrupt ownership state") from exc
@@ -114,6 +118,15 @@ def read_manifest(path):
             if not isinstance(name, str) or not isinstance(collection["files"], dict):
                 raise ValueError()
             for path, item in collection["files"].items():
+                if "origin" in item:
+                    validate_origin(item["origin"])
+                    if item["source_commit"] is None:
+                        raise ValueError()
+                    if (
+                        item["origin"]["kind"] == "git-lfs"
+                        and item["origin"]["oid"] != item["sha256"]
+                    ):
+                        raise ValueError()
                 if (
                     item["path"] != path
                     or path.startswith("/")

@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   canonical,
   parseManifest,
+  sourceOriginSchema,
   type Manifest,
   type OpenAIBinding,
 } from "../manifest.js";
@@ -138,8 +139,13 @@ export const operationSchema = z
       .regex(/^file[-_][A-Za-z0-9_-]{1,160}$/)
       .optional(),
     terminal_failure: z.literal(true).optional(),
+    origin: sourceOriginSchema.optional(),
   })
   .strict()
+  .refine(
+    (v) =>
+      !v.origin || v.origin.kind !== "git-lfs" || v.origin.oid === v.sha256,
+  )
   .refine((v) =>
     ["upload_ready", "upload_pending"].includes(v.phase)
       ? v.file_id === undefined
@@ -479,7 +485,7 @@ export class IngestionState {
       ownership: JSON.parse(String(a.ownership_json)),
       publication: this.publication(w),
       operation_count: Number(a.operation_count),
-      features: ["async-submit-v1"],
+      features: ["async-submit-v1", "file-origin-v1"],
       job: this.jobStatus(w),
     };
   }
@@ -778,6 +784,7 @@ export class IngestionState {
           o.sha256 !== f.sha256 ||
           o.file_id !== f.file_id ||
           o.source_commit !== f.source_commit ||
+          canonical(o.origin ?? null) !== canonical(f.origin ?? null) ||
           f.operation_id.includes(".retired.")
         )
           conflict();
@@ -870,6 +877,7 @@ export class IngestionState {
             branch: ownership.collections[name]!.branch ?? "unspecified",
             sha256: f.sha256,
             operation_id: f.operation_id,
+            ...(f.origin ? { source_kind: f.origin.kind } : {}),
           };
           this.storage.sql.exec(
             "INSERT INTO ingest_job_files VALUES(?,?,?,?,?,?)",

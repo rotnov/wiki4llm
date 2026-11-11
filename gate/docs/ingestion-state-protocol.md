@@ -303,7 +303,7 @@ operator actions.
 ## Asynchronous submission extension
 
 `GET /ingest/{workspace}/status` and fenced snapshots advertise
-`features: ["async-submit-v1"]` and `job: null` or the latest job metadata.
+`features: ["async-submit-v1", "file-origin-v1"]` and `job: null` or the latest job metadata.
 New clients require this capability before any provider writes. The existing
 per-file operation phases, leases, ownership and synchronous publish endpoint
 remain compatible with older clients.
@@ -366,3 +366,26 @@ sync/no-op, whose write credential can retire obsolete owned resources. Selected
 unpublished operation IDs are retained during that cleanup so interrupted uploads
 can resume. Cleanup uncertainty before a new submission preserves the old
 publication and fails the attempt explicitly.
+
+## Verified derived-source extension
+
+The `file-origin-v1` capability permits optional strict `origin` objects on
+operations and published files. Absence still means ordinary Git-blob provenance.
+LFS origin is `{kind: "git-lfs", oid: sha256, size: bytes}`; the OID must equal the
+operation/file byte SHA and size is a nonnegative safe integer. Generated origin
+is `{kind: "generated", recipe, recipe_sha256, inputs_sha256}`; recipe is a slug
+of at most 80 characters and both digests are lowercase SHA-256. Derived published
+entries require a non-null source commit.
+
+Origin is part of immutable operation metadata. Submit/publish compare the entire
+file origin with the owning receipt, and background readiness also checks the
+provider's `source_kind` attribute. It cannot be added, removed or relabeled on an
+existing operation. MCP query/get returns the stored origin so a generated logical
+path is not confused with an existing Git blob. Source preparation and input proof
+remain client responsibilities, described in [derived sources](../../docs/derived-sources.md).
+
+Upgrade the gate first; require the capability before staging or cleanup provider
+writes involving derived records. Older strict readers cannot parse publications
+with this extension, so do not roll the gate back below this capability while such
+publications remain active. Existing issuer, namespace and ownership bindings are
+unchanged.

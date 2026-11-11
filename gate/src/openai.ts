@@ -163,6 +163,7 @@ export class OpenAIBackend implements Backend {
         sha256: f.sha256,
         fileKind: f.kind,
         lineBasis: "parsed-text",
+        ...(f.origin ? { origin: f.origin } : {}),
       },
     };
   }

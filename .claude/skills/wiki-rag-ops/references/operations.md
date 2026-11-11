@@ -31,10 +31,12 @@ uv run wiki-rag --config "$RAG_CONFIG" index --apply
 
 `index --apply` initializes or resumes/converges; `update --apply` requires initialized
 state. A remote preview reads the authority but makes no provider writes. Inspect
-selection before an approved upload. Only Git-tracked eligible files are candidates;
+selection before an approved upload. Ordinary candidates are Git-tracked;
+explicit verified LFS and generator sources follow
+[derived sources](../../../../docs/derived-sources.md), never a generic untracked-file bypass.
 include globs must match, an optional extension allowlist further restricts them,
 and excludes win. Remote mode
-requires full committed history and literal selected HEAD bytes, with ancestry
+requires full committed history and literal HEAD bytes or the configured derived proof, with ancestry
 checks. Do not disable these guards to run a dirty or divergent source.
 
 Each collection retains a stable repository identity. Equal filenames across

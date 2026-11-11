@@ -1,4 +1,5 @@
 import type { Workspace } from "./state-contract.js";
+import type { SourceOrigin } from "./manifest.js";
 export type SearchMode = "lex" | "vec" | "hybrid";
 export interface Document {
   collection: string;
@@ -15,6 +16,7 @@ export interface Document {
     sha256: string;
     fileKind: string;
     lineBasis: "parsed-text";
+    origin?: SourceOrigin;
   };
 }
 export interface Hit extends Document {

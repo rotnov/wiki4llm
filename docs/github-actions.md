@@ -147,8 +147,12 @@ its checked-out HEAD. In direct mode, the environment-authorized workflow suppli
 parameters through the input environment; no generated file bypass is used. All collections must be cloned successfully before the engine starts; a
 failed second checkout cannot publish a partial workspace. Source materialization
 disables hooks, templates, filters, ident expansion, EOL/encoding transformations
-and submodule traversal. The actual engine still verifies committed literal bytes
-and rescans before publication.
+and submodule traversal. The actual engine verifies committed literal bytes or an
+explicit derived-source proof and rescans before submission. Optional `lfs` and
+`generators` collection fields work in both configuration modes; preparation
+downloads only selected verified LFS objects and executes trusted recipes from
+exported committed inputs without publisher/provider credentials. See
+[derived sources](derived-sources.md) before enabling repository-code generation.
 
 `sync` runs idempotent `index --apply`: initialization versus incremental update is
 chosen under the remote lease. `plan` acquires no lease and makes no provider

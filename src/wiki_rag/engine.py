@@ -43,6 +43,7 @@ def manifest_for(cfg, state):
                 or op.get("file_id") != item["file_id"]
                 or op["phase"] != "complete"
                 or op["store"] != item["vector_store_id"]
+                or op.get("origin") != item.get("origin")
             ):
                 raise RagError("manifest file missing from ownership state")
     return manifest
@@ -151,6 +152,7 @@ def stage_file(cfg, state, collection, snap, file, provider):
             "version": file.version,
             "source_commit": file.source_commit,
             "ingestion_attempts": ingestion_attempts,
+            **({"origin": file.origin} if file.origin else {}),
         }
         if not state.get("_remote"):
             operations[operation_id] = op
@@ -180,6 +182,7 @@ def stage_file(cfg, state, collection, snap, file, provider):
         "branch": collection.branch or "unspecified",
         "sha256": file.sha256,
         "operation_id": operation_id,
+        **({"source_kind": op["origin"]["kind"]} if op.get("origin") else {}),
     }
     if op["phase"] == "uploaded":
         op["phase"] = "attach_pending"
@@ -226,6 +229,7 @@ def stage_file(cfg, state, collection, snap, file, provider):
         "source_commit": op["source_commit"],
         "preprocessing": file.preprocessing,
         "operation_id": operation_id,
+        **({"origin": op["origin"]} if op.get("origin") else {}),
     }
 
 
@@ -273,6 +277,15 @@ def cleanup(cfg, state, manifest, provider):
 
 
 def run(cfg, command, *, apply=False, provider=None, remote=None):
+    if (
+        command != "status"
+        and cfg.prepared is None
+        and any(c.lfs or c.generators for c in cfg.collections)
+    ):
+        from .sources import prepare_sources
+
+        with prepare_sources(cfg) as prepared:
+            return run(prepared, command, apply=apply, provider=provider, remote=remote)
     if command not in {"index", "update", "plan", "status"}:
         raise RagError("unknown command")
     if cfg.remote_state:

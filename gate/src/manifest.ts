@@ -7,6 +7,27 @@ export const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const project = z.string().regex(/^proj_[A-Za-z0-9_-]{1,160}$/);
 const store = z.string().regex(/^vs_[A-Za-z0-9_-]{1,160}$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+export const sourceOriginSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("git-lfs"),
+      oid: hash,
+      size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("generated"),
+      recipe: z
+        .string()
+        .max(80)
+        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      recipe_sha256: hash,
+      inputs_sha256: hash,
+    })
+    .strict(),
+]);
+export type SourceOrigin = z.infer<typeof sourceOriginSchema>;
 const commit = z
   .string()
   .regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)
@@ -27,6 +48,7 @@ const file = z
     source_commit: commit,
     preprocessing: z.enum(["utf8-text-v1", "pdf-native-v1"]),
     operation_id: plain,
+    origin: sourceOriginSchema.optional(),
   })
   .strict();
 const collection = z
@@ -189,6 +211,12 @@ export function parseManifest(text: string, binding: OpenAIBinding): Manifest {
         path.split(".").at(-1)?.toLowerCase() !== f.kind
       )
         invalid("Invalid file processing identity");
+      if (
+        f.origin &&
+        (f.source_commit === null ||
+          (f.origin.kind === "git-lfs" && f.origin.oid !== f.sha256))
+      )
+        invalid("Invalid derived file provenance");
       files.add(f.file_id);
       paths.add(c.repository + "\0" + path);
     }

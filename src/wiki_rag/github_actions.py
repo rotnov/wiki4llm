@@ -98,7 +98,7 @@ def committed_config(path, content):
         raise RagError("workflow config must match its literal committed bytes")
 
 
-def checkout(repository, branch, destination, template, token):
+def checkout_environment(token):
     env = dict(os.environ)
     if token:
         n = int(env["GIT_CONFIG_COUNT"])
@@ -110,6 +110,11 @@ def checkout(repository, branch, destination, template, token):
                 f"GIT_CONFIG_VALUE_{n}": "AUTHORIZATION: basic " + encoded,
             }
         )
+    return env
+
+
+def checkout(repository, branch, destination, template, token):
+    env = checkout_environment(token)
     git(
         "clone",
         "--no-checkout",
@@ -128,6 +133,53 @@ def checkout(repository, branch, destination, template, token):
         "* -filter -ident -text -eol -working-tree-encoding\n"
     )
     git("-C", destination, "checkout", "--force", branch, "--")
+
+
+def fetch_lfs_object(collection, path, raw, spec, token):
+    """Use Git LFS's basic transfer for one verified pointer, never repo filters."""
+    if not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", collection.repository
+    ):
+        raise RagError("LFS requires a GitHub owner/repository identity")
+    env = checkout_environment(token)
+    url = f"https://github.com/{collection.repository}.git/info/lfs"
+    settings = {
+        "lfs.url": url,
+        "remote.origin.lfsurl": url,
+        "remote.origin.url": f"https://github.com/{collection.repository}.git",
+        "remote.lfsdefault": "origin",
+        "lfs.remote.autodetect": "false",
+        "lfs.remote.searchall": "false",
+        "lfs.basictransfersonly": "true",
+        "lfs.standalonetransferagent": "",
+        "http.sslVerify": "true",
+    }
+    for key, value in settings.items():
+        n = int(env["GIT_CONFIG_COUNT"])
+        env.update(
+            {
+                "GIT_CONFIG_COUNT": str(n + 1),
+                f"GIT_CONFIG_KEY_{n}": key,
+                f"GIT_CONFIG_VALUE_{n}": value,
+            }
+        )
+    try:
+        with tempfile.TemporaryFile() as stream:
+            result = subprocess.run(
+                ["git", "-C", str(collection.root), "lfs", "smudge", "--", path],
+                input=raw,
+                stdout=stream,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=180,
+                check=False,
+            )
+            if result.returncode or stream.tell() != spec["size"]:
+                raise RagError("selected LFS object transfer failed or returned the wrong size")
+            stream.seek(0)
+            return stream.read(spec["size"] + 1)
+    except OSError, subprocess.TimeoutExpired:
+        raise RagError("selected LFS object transfer failed or timed out") from None
 
 
 def finish_clients(remote, provider, result, failed):
@@ -194,7 +246,17 @@ def workflow_config(inputs, workspace):
     for collection in collections:
         keys(
             collection,
-            {"name", "repository", "vector_store_id", "branch", "include", "exclude", "extensions"},
+            {
+                "name",
+                "repository",
+                "vector_store_id",
+                "branch",
+                "include",
+                "exclude",
+                "extensions",
+                "lfs",
+                "generators",
+            },
         )
     raw = {
         "version": 1,
@@ -303,13 +365,18 @@ def execute(
                         sources[key] = target
                     collections.append(replace(c, root=sources[key]))
                 cfg = replace(cfg, collections=tuple(collections))
-                result = engine(
-                    cfg,
-                    "index" if mode == "sync" else "plan",
-                    apply=mode == "sync",
-                    provider=provider,
-                    remote=remote,
-                )
+                from .sources import prepare_sources
+
+                with prepare_sources(
+                    cfg, fetch_lfs=lambda c, p, r, s: fetch_lfs_object(c, p, r, s, token)
+                ) as prepared:
+                    result = engine(
+                        prepared,
+                        "index" if mode == "sync" else "plan",
+                        apply=mode == "sync",
+                        provider=provider,
+                        remote=remote,
+                    )
                 result = {**result, "workspace": cfg.remote_state.workspace}
         finally:
             finish_clients(remote, provider, result, sys.exc_info()[0] is not None)

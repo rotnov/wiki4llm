@@ -85,13 +85,16 @@ has an independent stable `repository` identity, local `root`, optional
 `branch`, and existing `vector_store_id`; these are distinct concepts. Multiple
 collections can contain `README.md` without collision.
 
-Only Git-tracked paths are considered. In local mode, working-tree bytes are captured, hashed,
+By default only Git-tracked paths are considered. Explicit verified LFS and generated
+documentation sources are described in [derived sources](docs/derived-sources.md).
+For ordinary files in local mode, working-tree bytes are captured, hashed,
 and uploaded; staged versions do not override working-tree contents. Each
 file's `source_commit` is set only when those exact bytes match its HEAD blob;
 otherwise it is null. Repository HEAD is separately recorded for ancestry and
 concurrent-change guards. A configured branch must be the checked-out branch;
 detached HEAD is rejected when `branch` is configured. Remote mode requires full
-history, an index equal to HEAD and selected literal HEAD blob bytes; see the
+history, an index equal to HEAD and literal ordinary HEAD bytes or an explicit
+verified derived source; see the
 [remote source policy](docs/remote-state.md#source-policy).
 
 Include globs select paths; excludes always win. An optional `extensions` allowlist
@@ -112,7 +115,7 @@ Text handling accepts UTF-8. Known text suffixes include Markdown, plain text,
 reStructuredText, common source code, JSON, YAML, TOML, HTML, XML and CSV; see
 `TEXT_SUFFIXES` in [selection.py](src/wiki_rag/selection.py) for the exact set.
 Eligible text is sent unchanged as a uniquely named `.txt` file. The original
-path and kind remain in attributes and the manifest. LFS pointers, NUL-containing
+path and kind remain in attributes and the manifest. LFS pointers without `lfs = true`, NUL-containing
 or non-UTF-8 text, and unsupported formats are reported as skipped.
 
 PDFs are supported when include globs match and the optional extension allowlist

@@ -38,22 +38,31 @@ Each collection object has these fields:
 
 Each file object has these fields:
 
-| Field             | Type and meaning                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `path`            | Original repository path, equal to the map key                                                       |
-| `file_id`         | Provider File ID; the vector-store attachment shares this ID                                         |
-| `vector_store_id` | Equal to the collection's store ID                                                                   |
-| `sha256`          | Lowercase SHA-256 of the exact uploaded bytes                                                        |
-| `version`         | SHA-256 of canonical JSON `[sha256, file_processing]`                                                |
-| `kind`            | Lowercase original extension without dot                                                             |
-| `source_commit`   | Commit whose blob matches the exact uploaded bytes; null for working-tree content without that proof |
-| `preprocessing`   | `utf8-text-v1` (unchanged UTF-8 bytes) or `pdf-native-v1` (unchanged native PDF bytes)               |
-| `operation_id`    | Opaque ownership/reconciliation identifier; not a permission token                                   |
+| Field             | Type and meaning                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `path`            | Original repository path, equal to the map key                                                                    |
+| `file_id`         | Provider File ID; the vector-store attachment shares this ID                                                      |
+| `vector_store_id` | Equal to the collection's store ID                                                                                |
+| `sha256`          | Lowercase SHA-256 of the exact uploaded bytes                                                                     |
+| `version`         | SHA-256 of canonical JSON `[sha256, file_processing]`                                                             |
+| `kind`            | Lowercase original extension without dot                                                                          |
+| `source_commit`   | Commit proving the ordinary blob, LFS pointer or generated inputs; null only for ordinary uncommitted local bytes |
+| `preprocessing`   | `utf8-text-v1` (unchanged UTF-8 bytes) or `pdf-native-v1` (unchanged native PDF bytes)                            |
+| `operation_id`    | Opaque ownership/reconciliation identifier; not a permission token                                                |
+| `origin`          | Optional verified `git-lfs` or `generated` provenance; absent for ordinary Git blobs                              |
 
 `file_processing` is the collection processing object with its `preprocessing`
 field replaced by the individual file value. Text is uploaded as `.txt`; PDF
 files retain `.pdf` and `application/pdf`. Native PDF text extraction belongs
 to the provider, and the byte hash always describes the uploaded PDF itself.
+For derived sources, file processing additionally includes `source_kind` equal to
+`origin.kind`. Existing ordinary-file version hashes remain unchanged. Origin is
+strictly validated and immutable in the owning operation. LFS origin contains
+`{kind: "git-lfs", oid: sha256, size: bytes}`; generated origin contains
+`{kind: "generated", recipe, recipe_sha256, inputs_sha256}`. Derived source commits
+are non-null; an LFS OID equals the uploaded-byte SHA. A generated path is a logical
+path and may not exist in Git. MCP returns this origin explicitly. See
+[derived sources](derived-sources.md) for preparation and compatibility.
 
 Canonical JSON for hashes uses Python-compatible `json.dumps(..., sort_keys=True,
 separators=(",", ":"))` with default ASCII escaping, UTF-8 encoded. Consumers should

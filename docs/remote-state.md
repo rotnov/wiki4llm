@@ -73,22 +73,26 @@ lease, the client reads the current authority and requires each previous publica
 commit to be an ancestor of the current checkout. It never pulls source or invokes
 source hooks. A stale, divergent or shallow checkout fails before provider writes.
 
-The entire staged mode/blob/path map must equal HEAD's tree. Selected working files
+The entire staged mode/blob/path map must equal HEAD's tree. Selected ordinary working files
 must exist and contain the literal bytes of the HEAD blob. A selected HEAD regular
 file replaced by a working symlink (including an ancestor symlink), or hidden behind
 a newly introduced nested `.git` boundary, fails instead of becoming an apparent
 deletion. Committed symlinks/gitlinks and paths excluded by static selection policy
 remain excluded; local-mode working substitutions keep their existing skip policy. Git external diff,
 textconv, clean/process filters, hooks and fsmonitor are not invoked by this check.
-Unselected working bytes are outside the publication. Smudged LFS content, EOL
-conversion and other transformed selected bytes are rejected; supporting these
-needs an explicit future provenance policy. Committed LFS pointer files remain
-excluded by the existing selector. The local backend still supports dirty working
+Unselected working bytes are outside the publication. EOL conversion and unverified
+transformed selected bytes are rejected. Explicit `lfs = true` sources verify native
+bytes against committed pointer hashes/sizes; explicit generators execute exported
+HEAD inputs in a temporary tree. These sources require `file-origin-v1` before
+provider mutations, including cleanup. See [derived sources](derived-sources.md).
+Without that opt-in LFS pointers remain excluded. The local backend still supports dirty working
 files and reports null committed provenance for their changed bytes.
 
 Hash-based file selection remains authoritative. The source is rescanned before
 submission. Unchanged active entries reuse server-certified ownership and file
 IDs; content changes, renames and deletions converge only through a new publication.
+Derived preparation also captures a separate input/recipe/output identity for the
+rescan, so unchanged upload bytes cannot hide a concurrent preparation change.
 
 ## Failure and concurrency behavior
 
