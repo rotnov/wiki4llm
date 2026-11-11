@@ -104,12 +104,12 @@ exact `resource_metadata` URL from `WWW-Authenticate`, then the advertised issue
 metadata. Verify resource, authorization/token endpoints and registration method.
 Use real client OAuth; do not manually forward a browser cookie or JWT as a fix.
 
-| Client               | Setup and acceptance                                                                                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex Desktop / CLI  | Add Streamable HTTP URL and complete `codex mcp login`; confirm the active host configuration and execute tools.                                                                 |
-| Claude web / Desktop | Add a remote **Web Custom** connector, complete OAuth, verify Connected and tools. A local Desktop extension is not equivalent.                                                  |
-| ChatGPT web          | Plugins, Add custom MCP server, HTTPS `/mcp`, OAuth/DCR, Create as a plugin, then Connect. Inspect Connected accounts and Refresh tools.                                         |
-| Codex Cloud          | Check the current supported plugin path and a runnable published environment. Test in that cloud environment; local TOML and ChatGPT connection alone are insufficient evidence. |
+| Client               | Setup and acceptance                                                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Codex Desktop / CLI  | Add Streamable HTTP URL and complete `codex mcp login`; confirm the active host configuration and execute tools.                                                                           |
+| Claude web / Desktop | Add a remote **Web Custom** connector, complete OAuth, verify Connected and tools. A local Desktop extension is not equivalent.                                                            |
+| ChatGPT web          | Plugins, Add custom MCP server, HTTPS `/mcp`, OAuth/DCR, Create as a plugin, then Connect. Inspect Connected accounts and Refresh tools.                                                   |
+| Codex Cloud          | Use the skill's Codex Cloud procedure: connect the account-level cloud plugin, publish the selected environment, explicitly select `@Wiki RAG` in a new cloud task, then verify query/get. |
 
 ChatGPT's advanced OAuth form shows discovered endpoints and the actual callback
 under its client configuration. If creation reports rejected settings, compare

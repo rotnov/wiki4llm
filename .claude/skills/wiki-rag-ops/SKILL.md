@@ -3,7 +3,8 @@ name: wiki-rag-ops
 description: >-
   Deploy and operate wiki4llm / Wiki RAG on Cloudflare Workers with Durable Objects
   and Access Managed OAuth. Use when setting up or upgrading the gate, managing
-  reader or publisher permissions, connecting Claude or ChatGPT/Codex MCP clients,
+  reader or publisher permissions, connecting Claude or ChatGPT/Codex MCP clients
+  including Codex Cloud through a cloud plugin and a published environment,
   installing reusable GitHub Actions in consumer repositories, configuring manual
   and after-merge indexing with inputs and secrets, rotating credentials, or diagnosing access
   and indexing failures. Also use for WikiRack or WikiRag operations requests.
@@ -50,6 +51,7 @@ results; never record secret values, OAuth codes, assertions or document bodies.
 | ---------------------------------------------------------------------- | --------------------------------------------------------- |
 | First deployment, upgrade, separate-account front, rollback            | [Deployment and topology](references/deployment.md)       |
 | Reader/publisher grants, revocation, OAuth, client connections         | [Access and clients](references/access.md)                |
+| Connect Wiki RAG to Codex Cloud and verify real tool calls             | [Codex Cloud connection](references/codex-cloud.md)       |
 | Connect a repository to GitHub Actions; manual or after-merge indexing | [GitHub Actions onboarding](references/github-actions.md) |
 | Index/update, incidents, acceptance report                             | [Ingestion and diagnostics](references/operations.md)     |
 
