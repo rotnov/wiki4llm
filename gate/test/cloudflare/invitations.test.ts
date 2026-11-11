@@ -217,7 +217,7 @@ test("invitation activation binds only its authenticated recipient and preserves
     );
     assert.equal(
       invitation.prompt,
-      "Connect wiki4llm MCP as a web connection: https://gate.example/mcp.\nUse person@example.org to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to example and retrieve a document.",
+      "Use computer use to add wiki4llm as a web connector through the application UI: https://gate.example/mcp.\nDo not configure it through local config files or CLI commands.\nUse person@example.org to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to example and retrieve a document.",
     );
     assert.equal("prompt" in result, false);
     const acceptedPage = await req(

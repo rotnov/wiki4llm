@@ -84,7 +84,8 @@ as a draft and retain the uppercase placeholders. Do not include operator secret
 The email is for wiki4llm authentication, not necessarily the AI client's account.
 
 ```text
-Connect wiki4llm MCP as a web connection: {MCP_URL}.
+Use computer use to add wiki4llm as a web connector through the application UI: {MCP_URL}.
+Do not configure it through local config files or CLI commands.
 Use {EMAIL} to sign in; I will complete the browser authentication myself.
 After connecting, verify access to {WORKSPACES} and retrieve a document.
 ```
@@ -92,6 +93,10 @@ After connecting, verify access to {WORKSPACES} and retrieve a document.
 ## Agent connection procedure
 
 Determine the actual client surface and use [access procedures](access.md).
+For this invitation flow, use computer use to add a hosted web connector in the
+application UI. Do not substitute local MCP configuration or CLI registration.
+If computer use or web connectors are unavailable in the chosen client, explain
+the specific limitation and request a supported surface instead of changing modes.
 Inspect existing MCP entries and reuse a matching connection without silently
 overwriting a different server. Use remote HTTP/OAuth, not a local stdio server.
 Leave browser authentication to the user; never ask for passwords or login codes
