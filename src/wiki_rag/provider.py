@@ -1,12 +1,15 @@
 """Small fixed-origin adapter to the official Files and Vector Stores HTTP APIs."""
 
+import json
 import os
 import re
+import sys
 import time
 
 import httpx
 
 from .config import RagError
+from .provider_diagnostics import attribute_values, error_details, route_shape
 from .selection import digest
 
 
@@ -36,6 +39,7 @@ class OpenAIProvider:
         if not key or "\n" in key or "\r" in key:
             raise RagError("configured API key environment variable is missing or invalid")
         self.sleep = sleep
+        self._diagnostic_secrets = (key, cfg.project_id)
         self.mutation_guard = lambda: None
         self.client = httpx.Client(
             base_url="https://api.openai.com/v1/",
@@ -60,24 +64,64 @@ class OpenAIProvider:
     def close(self):
         self.client.close()
 
-    def request(self, method, path, *, missing_ok=False, retry_rate_limit=False, **kwargs):
+    def request(
+        self, method, path, *, missing_ok=False, retry_rate_limit=False, stage=None, **kwargs
+    ):
         safe_replay = method in {"GET", "DELETE"}
         attempts = 3 if safe_replay or retry_rate_limit else 1
+        route = route_shape(path)
+        context = {"stage": stage or route, "method": method, "route": route}
+        payload = kwargs.get("json")
+        if isinstance(payload, dict) and isinstance(payload.get("files"), list):
+            context["batch_size"] = len(payload["files"])
+        sensitive = [*self._diagnostic_secrets, *attribute_values(payload)]
+
+        def emit(event, **details):
+            print(
+                "wiki-rag: " + json.dumps({"event": event, **context, **details}), file=sys.stderr
+            )
+
         for attempt in range(attempts):
             if method not in {"GET", "HEAD"}:
                 self.mutation_guard()
+            if "batch_size" in context or stage == "recover_attachment_metadata":
+                emit("provider_request_started", attempt=attempt + 1)
+            started = time.monotonic()
             try:
                 response = self.client.request(method, path, **kwargs)
             except httpx.TransportError:
+                emit(
+                    "provider_transport_failed",
+                    attempt=attempt + 1,
+                    elapsed_ms=round((time.monotonic() - started) * 1000),
+                    retrying=safe_replay and attempt + 1 < attempts,
+                )
                 if safe_replay and attempt + 1 < attempts:
                     self.sleep(2**attempt)
                     continue
-                raise RagError("provider transport failed; write outcome may be unknown") from None
+                raise RagError(
+                    f"provider transport failed ({method} {route}); write outcome may be unknown"
+                ) from None
+            timing = {
+                "attempt": attempt + 1,
+                "elapsed_ms": round((time.monotonic() - started) * 1000),
+                "status": response.status_code,
+            }
+            request_id = response.headers.get("x-request-id", "")
+            if re.fullmatch(r"req_[A-Za-z0-9_-]{1,150}", request_id):
+                timing["request_id"] = request_id
+            diagnostic = error_details(response, sensitive=sensitive) if response.is_error else {}
+            if response.is_error:
+                emit("provider_request_failed", **timing, **diagnostic)
+            elif "batch_size" in context or stage == "recover_attachment_metadata":
+                emit("provider_request_completed", **timing)
             if response.status_code == 404 and missing_ok:
                 return None
             if response.status_code == 429 and retry_rate_limit and attempt + 1 < attempts:
                 delay = response.headers.get("Retry-After", "60")
-                self.sleep(max(1, min(60, int(delay))) if delay.isdecimal() else 60)
+                delay = max(1, min(60, int(delay))) if delay.isdecimal() else 60
+                emit("provider_retry_scheduled", attempt=attempt + 1, delay_seconds=delay)
+                self.sleep(delay)
                 continue
             if (
                 safe_replay
@@ -96,7 +140,10 @@ class OpenAIProvider:
                 label = (
                     "permission denied" if response.status_code in {401, 403} else "request failed"
                 )
-                raise error(f"provider {label} (HTTP {response.status_code})")
+                suffix = "; " + json.dumps({**context, **timing, **diagnostic})
+                raise error(
+                    f"provider {label} (HTTP {response.status_code}; {method} {route}{suffix})"
+                )
             return response
         raise RagError("provider retry limit reached")
 
@@ -191,6 +238,7 @@ class OpenAIProvider:
             f"vector_stores/{store}/file_batches",
             json={"files": files},
             retry_rate_limit=True,
+            stage="attach_batch",
         )
         identifier(data.get("id"), "vsfb_")
         if data.get("status") not in {"in_progress", "completed", "failed", "cancelled"}:
@@ -259,7 +307,12 @@ class OpenAIProvider:
             raise RagError("attachment recovery source does not match its upload receipt")
 
         def inspect():
-            item = self.attachment(store, fid)
+            item = self.json(
+                "GET",
+                f"vector_stores/{store}/files/{fid}",
+                missing_ok=True,
+                stage="recover_attachment_inspect",
+            )
             if not item or item.get("id") != fid or item.get("vector_store_id") != store:
                 raise RagError("attachment recovery identity mismatch")
             if item.get("status") not in {"in_progress", "completed", "failed", "cancelled"}:
@@ -279,7 +332,7 @@ class OpenAIProvider:
         current = inspect()
         if current["attributes"] == attributes:
             return current
-        uploaded = self.json("GET", f"files/{fid}")
+        uploaded = self.json("GET", f"files/{fid}", stage="recover_upload_inspect")
         if (
             uploaded.get("id") != fid
             or uploaded.get("filename") != filename
@@ -293,7 +346,12 @@ class OpenAIProvider:
         current = inspect()
         if current["attributes"] == attributes:
             return current
-        self.request("POST", f"vector_stores/{store}/files/{fid}", json={"attributes": attributes})
+        self.request(
+            "POST",
+            f"vector_stores/{store}/files/{fid}",
+            json={"attributes": attributes},
+            stage="recover_attachment_metadata",
+        )
         current = inspect()
         if current["attributes"] != attributes:
             raise RagError("attachment metadata recovery readback failed")

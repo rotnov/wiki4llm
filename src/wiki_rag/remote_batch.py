@@ -156,6 +156,10 @@ def stage_files(cfg, state, selected, provider):
             found = provider.attachments_by_id(
                 store, {ops[oid]["file_id"] for oid, _, _ in uncertain}
             )
+            print(
+                f"wiki-rag: reconciling attachments (pending={len(uncertain)}, found={len(found)})",
+                file=sys.stderr,
+            )
             confirmed = []
             for oid, c, f in uncertain:
                 attached = found.get(ops[oid]["file_id"])
@@ -224,6 +228,10 @@ def stage_files(cfg, state, selected, provider):
                 ops[oid]["phase"] = "attached"
                 confirmed.append(oid)
             checkpoint(confirmed)
+            print(
+                f"wiki-rag: reconciled attachment receipts ({len(confirmed)} files)",
+                file=sys.stderr,
+            )
         batches, batch = [], []
         for oid, c, f in group:
             if ops[oid]["phase"] != "uploaded":

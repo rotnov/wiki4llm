@@ -70,6 +70,16 @@ Attachment batches retry an explicit HTTP 429 rejection at most twice, using
 the writer lease before every attempt. Unknown create outcomes such as HTTP 500
 or a transport failure keep their durable intent for reconciliation.
 
+Provider diagnostics identify the operation stage, masked HTTP route, batch size,
+attempt, elapsed milliseconds, HTTP status and OpenAI request ID. Batch submission
+and metadata recovery log start/completion separately; reconciliation reports
+pending/found/confirmed counts. Failures retain recognized error codes and parameter
+paths plus a bounded provider explanation. Known credentials and request attribute
+values, resource IDs, URLs, email addresses and quoted data are redacted before
+truncation. Request bodies, document bytes, headers and complete response bodies
+are never serialized. Provider prose redaction is best-effort; keep consumer logs
+as private operational records rather than publishing them as generic tool artifacts.
+
 After attachment submission and a matching rescan, `submit` durably captures the
 exact manifest. The CLI returns `mode: submitted` and `job_id`, without waiting for
 OpenAI indexing. A Durable Object alarm verifies readiness and atomically publishes

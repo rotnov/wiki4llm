@@ -152,6 +152,37 @@ def test_unknown_metadata_update_is_read_back_next_attempt_without_reposting(rec
     assert sum(method == "POST" for method, _ in calls) == 1
 
 
+def test_provider_failure_identifies_route_without_echoing_response_or_resource(
+    tmp_path, repo, monkeypatch
+):
+    cfg = remote_config(tmp_path, repo)
+    monkeypatch.setenv(cfg.api_key_env, "synthetic")
+
+    def handle(request):
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_value",
+                    "param": "attributes.path",
+                    "message": "Invalid value 'PRIVATE PROVIDER DETAILS' for 'attributes.path'",
+                }
+            },
+        )
+
+    with OpenAIProvider(cfg, transport=httpx.MockTransport(handle)) as provider:
+        with pytest.raises(RagError) as error:
+            provider.request("POST", "vector_stores/vs_private/files/file-private", json={})
+    message = str(error.value)
+    assert "POST vector_stores/{id}/files/{id}" in message
+    assert "invalid_request_error" in message and "invalid_value" in message
+    assert "attributes.path" in message
+    assert (
+        "PRIVATE" not in message and "vs_private" not in message and "file-private" not in message
+    )
+
+
 def test_engine_recovers_empty_attributes_without_new_upload_or_batch(tmp_path, repo, monkeypatch):
     from test_batch_remote import invoke, setup_batch
 
