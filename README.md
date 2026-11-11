@@ -9,6 +9,7 @@ MCP gateway, and a reusable GitHub Actions workflow in one repository.
 - **[Develop and verify](docs/development.md)** — local checks and public release process.
 - **[Operator skill](.claude/skills/wiki-rag-ops/SKILL.md)** — deployment, access,
   OAuth clients, ingestion and recovery procedures for agents.
+- **[Public explainer](site/index.html)** — purpose and principles; [site maintenance](docs/public-site.md).
 
 The Python command remains `wiki-rag`. It ingests Git-tracked text and explicitly
 selected PDFs into OpenAI Retrieval and publishes an active-file registry for

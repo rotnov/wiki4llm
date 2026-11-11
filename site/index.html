@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="wiki4llm turns selected Git documentation into searchable, permission-aware context for coding agents."
+    />
+    <meta name="theme-color" content="#f5f5ef" />
+    <title>wiki4llm — Project knowledge for your agents</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="shell masthead">
+      <a class="brand" href="#" aria-label="wiki4llm home"
+        ><span class="mark" aria-hidden="true">w/</span>wiki4llm</a
+      >
+      <nav aria-label="Main navigation">
+        <a href="#how">How it works</a><a href="#access">Access</a
+        ><a href="#workflow">Workflow</a>
+      </nav>
+    </header>
+    <main id="main">
+      <section class="shell hero" aria-labelledby="title">
+        <div class="eyebrow">
+          <span class="dot"></span>Git knowledge. Agent ready.
+        </div>
+        <h1 id="title">
+          Your project knows.<br /><span>Let your agents ask.</span>
+        </h1>
+        <p class="intro">
+          wiki4llm turns selected documentation from your Git repositories into
+          searchable context for coding agents. Keep the source in Git. Give
+          agents the knowledge they are allowed to use.
+        </p>
+        <a class="button" href="#how"
+          >Follow the flow <span aria-hidden="true">↗</span></a
+        >
+        <div class="hero-note">
+          Incremental updates <span>·</span> Source provenance
+          <span>·</span> Read-only MCP
+        </div>
+      </section>
+
+      <section class="shell flow" aria-label="Knowledge flow">
+        <div class="flow-label">THE SHORT VERSION</div>
+        <ol class="flow-steps">
+          <li>
+            <span class="step-no">01</span><strong>Git sources</strong
+            ><small>Choose the knowledge</small>
+          </li>
+          <li>
+            <span class="step-no">02</span><strong>Incremental index</strong
+            ><small>Process what changed</small>
+          </li>
+          <li>
+            <span class="step-no">03</span><strong>Active publication</strong
+            ><small>Make a complete update visible</small>
+          </li>
+          <li>
+            <span class="step-no">04</span><strong>MCP retrieval</strong
+            ><small>Return authorized context</small>
+          </li>
+        </ol>
+      </section>
+
+      <section id="how" class="shell section" aria-labelledby="how-title">
+        <div class="section-heading">
+          <span class="eyebrow">01 / The mechanism</span>
+          <h2 id="how-title">From tracked files<br />to useful context.</h2>
+          <p>
+            A repeatable path from the documentation your team maintains to the
+            sources an agent can retrieve.
+          </p>
+        </div>
+        <div class="mechanism">
+          <article>
+            <span class="row-no">01</span>
+            <div>
+              <h3>Select the knowledge</h3>
+              <p>
+                Choose the Git-tracked files each collection should include.
+                Include patterns, exclusions and file types define the scope.
+                Connecting a repository does not mean indexing every file.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="row-no">02</span>
+            <div>
+              <h3>Index the changes</h3>
+              <p>
+                The indexer compares content and processing settings with
+                durable state. It uploads new or changed files and reuses
+                unchanged versions.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="row-no">03</span>
+            <div>
+              <h3>Publish a complete update</h3>
+              <p>
+                A new publication becomes active after the selected files finish
+                indexing and source checks pass. A failure before publication
+                preserves the previous active snapshot.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="row-no">04</span>
+            <div>
+              <h3>Retrieve the source</h3>
+              <p>
+                An agent uses <code>query</code> to find relevant content and
+                <code>get</code> to read a returned reference. Results carry
+                repository, document and revision provenance.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="access" class="dark-section" aria-labelledby="access-title">
+        <div class="shell access-grid">
+          <div>
+            <span class="eyebrow">02 / The boundaries</span>
+            <h2 id="access-title">Organize sources.<br />Scope access.</h2>
+            <p>
+              Authentication establishes who is asking. Reader grants determine
+              which workspaces that identity may access.
+            </p>
+          </div>
+          <div class="workspace-visual">
+            <div class="workspace-head">
+              <span>WORKSPACE</span><span class="pill">Reader grants</span>
+            </div>
+            <div class="collection">
+              <span class="folder" aria-hidden="true"></span>
+              <div>
+                <strong>Collection A</strong
+                ><small>Selected documentation from a repository</small>
+              </div>
+            </div>
+            <div class="collection">
+              <span class="folder" aria-hidden="true"></span>
+              <div>
+                <strong>Collection B</strong
+                ><small>Another source, with its own identity</small>
+              </div>
+            </div>
+            <p>
+              One workspace, multiple collections.<br />Access is granted at the
+              workspace boundary.
+            </p>
+          </div>
+        </div>
+        <div class="shell boundary-notes">
+          <p>
+            <strong>Workspaces define access.</strong> Each groups collections
+            under reader grants and a shared publication lifecycle.
+          </p>
+          <p>
+            <strong>Collections organize sources.</strong> Separate collections
+            preserve source identities, even when files have the same name.
+          </p>
+        </div>
+      </section>
+
+      <section
+        id="workflow"
+        class="shell section automation"
+        aria-labelledby="workflow-title"
+      >
+        <div class="section-heading">
+          <span class="eyebrow">03 / The operating model</span>
+          <h2 id="workflow-title">
+            One workflow.<br />A durable memory of the work.
+          </h2>
+          <p>
+            Reuse the same GitHub Actions indexing workflow across repositories,
+            with explicit configuration and separate credentials.
+          </p>
+        </div>
+        <div class="automation-details">
+          <article>
+            <span class="badge">START SMALL</span>
+            <h3>Preview. Verify. Automate.</h3>
+            <p>
+              Begin with a manual preview. Run indexing and retrieval checks.
+              Then enable automatic updates on approved branch pushes. Each run
+              synchronizes the whole configured workspace.
+            </p>
+          </article>
+          <article>
+            <span class="badge">KEEP THE STATE</span>
+            <h3>Temporary runner, durable journal.</h3>
+            <p>
+              The remote authority keeps ownership, publication state and
+              coordination between publishers. Subsequent runs can reconcile
+              interrupted work. Runner caches and build artifacts are not the
+              state authority.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="shell retrieval" aria-labelledby="retrieval-title">
+        <div>
+          <span class="eyebrow">04 / The agent interface</span>
+          <h2 id="retrieval-title">
+            Find it. Read it.<br />Know where it came from.
+          </h2>
+          <p>
+            The gateway checks reader permissions and active-file membership
+            before returning content. Ingestion and retrieval use separate
+            credentials; MCP reads do not edit your Git sources.
+          </p>
+        </div>
+        <div class="tool-list" aria-label="Read-only MCP tools">
+          <div>
+            <code>list_workspaces</code
+            ><span>Discover accessible knowledge</span>
+          </div>
+          <div>
+            <code>status</code><span>Inspect published document counts</span>
+          </div>
+          <div><code>query</code><span>Search authorized workspaces</span></div>
+          <div>
+            <code>get</code><span>Read one exact source reference</span>
+          </div>
+          <div>
+            <code>multi_get</code><span>Read several returned references</span>
+          </div>
+        </div>
+      </section>
+      <section class="shell closing">
+        <span class="dot"></span>
+        <p>
+          Start with a small, reviewed collection.<br /><strong
+            >Expand the knowledge deliberately.</strong
+          >
+        </p>
+        <small
+          >Sources, reader access and automatic updates are configured
+          explicitly.<br />Available context depends on what has been connected
+          and published.</small
+        >
+      </section>
+    </main>
+    <footer class="shell">
+      <a class="brand" href="#">wiki4llm</a
+      ><span>Project knowledge for coding agents.</span
+      ><span>Open source · MIT</span>
+    </footer>
+  </body>
+</html>
