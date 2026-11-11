@@ -20,12 +20,15 @@ on:
         default: ""
         description: JSON array of collections (name, repository, branch, vector_store_id, include, exclude, extensions)
       max-files:
+        description: Selection budget in direct input mode; -1 disables this budget
         type: number
         default: 10000
       max-file-bytes:
+        description: Selection budget in direct input mode; -1 disables this budget
         type: number
         default: 2000000
       max-total-bytes:
+        description: Selection budget in direct input mode; -1 disables this budget
         type: number
         default: 50000000
       unlimited-files:

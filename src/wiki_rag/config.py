@@ -33,8 +33,8 @@ def integer(value, minimum, maximum):
 
 
 def selection_limit(value, maximum):
-    """Only the explicit sentinel disables a selection budget."""
-    if value == "unlimited":
+    """Disable a budget with integer -1 or the legacy string alias."""
+    if (type(value) is int and value == -1) or value == "unlimited":
         return None
     return integer(value, 1, maximum)
 

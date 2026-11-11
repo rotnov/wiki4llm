@@ -401,7 +401,7 @@ def test_invalid_branch_never_runs_engine(repo, credentials, branch):
     assert all(c.closed for c in clients)
 
 
-@pytest.mark.parametrize("direct_inputs", [False, True, "unlimited"])
+@pytest.mark.parametrize("direct_inputs", [False, True, "unlimited", "numeric-unlimited"])
 def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
     repo, tmp_path, credentials, monkeypatch, capsys, direct_inputs
 ):
@@ -417,6 +417,8 @@ def test_real_workflow_stdout_keeps_paths_private_through_index_noop_deletion(
             params.update(
                 {f"unlimited-{name}": True for name in ("files", "file-bytes", "total-bytes")}
             )
+        if direct_inputs == "numeric-unlimited":
+            params.update({f"max-{name}": -1 for name in ("files", "file-bytes", "total-bytes")})
         monkeypatch.setenv("WIKI_RAG_WORKFLOW_INPUTS", json.dumps(params))
     else:
         configuration(repo)
@@ -545,7 +547,7 @@ def test_local_authority_not_accepted(repo, credentials):
         {"collections": "[]"},
         {"collections": "{}"},
         {"max-files": True},
-        {"max-file-bytes": -1},
+        {"max-file-bytes": -2},
         {"max-total-bytes": 200_000_001},
         {"chunk-overlap": 401},
         {"config": "wiki-rag.toml"},

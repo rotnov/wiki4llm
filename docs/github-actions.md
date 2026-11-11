@@ -70,25 +70,25 @@ lease. A caller updates the whole configured workspace, not just its own reposit
 
 ## Selection budgets
 
-Numeric `max-files`, `max-file-bytes` and `max-total-bytes` retain their input types,
-defaults and valid ranges. For direct configuration, explicitly opt out of individual
-selection budgets using boolean inputs in the caller's `with:` block:
+Numeric `max-files`, `max-file-bytes` and `max-total-bytes` keep their defaults
+and positive integer ranges. Set any of them to `-1` to disable that selection
+budget independently in direct configuration:
 
 ```yaml
-unlimited-files: true
-unlimited-file-bytes: true
-unlimited-total-bytes: true
+max-files: -1
+max-file-bytes: -1
+max-total-bytes: -1
 ```
 
-Each `true` takes precedence over its matching numeric budget; the numeric input
-must still be valid. Omitted or `false` switches keep the numeric budget. Strings
-such as `"true"`, `0`, negative numbers and sentinel numeric values are rejected.
-In TOML configuration mode, `true` switches are rejected before checkout: set
-`max_files = "unlimited"`, `max_file_bytes = "unlimited"` or
-`max_total_bytes = "unlimited"` in the committed TOML instead. No switch overrides
-a committed config file.
+For existing callers, the boolean `unlimited-files`, `unlimited-file-bytes` and
+`unlimited-total-bytes` switches remain supported and default to `false`. A true
+switch disables its corresponding budget after validating the numeric input.
+These switches are direct-input only: a true switch with `config` is rejected
+before checkout. In TOML mode, write `max_files = -1`, `max_file_bytes = -1` or
+`max_total_bytes = -1` in the committed TOML instead. The legacy TOML string
+`"unlimited"` is still accepted; direct numeric inputs require integers.
 
-These switches remove selection budgets only. The gate still permits at most
+These settings remove selection budgets only. The gate still permits at most
 10,000 active files across the workspace, and its manifest, journal, collection
 and request limits remain unchanged; see the [protocol](../gate/docs/ingestion-state-protocol.md).
 Provider limits, the 30-minute workflow timeout and runner RAM/disk remain finite.

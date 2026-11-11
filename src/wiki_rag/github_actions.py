@@ -213,9 +213,10 @@ def workflow_config(inputs, workspace):
         if type(enabled) is not bool:
             raise RagError(f"{switch} must be a boolean")
         # Keep the workflow's numeric input contract even when its budget is disabled.
-        integer(raw[field], 1, maximum)
+        if type(raw[field]) is not int or raw[field] != -1:
+            integer(raw[field], 1, maximum)
         if enabled:
-            raw[field] = "unlimited"
+            raw[field] = -1
     return config_from_mapping(raw, workspace / "workflow-inputs.toml")
 
 

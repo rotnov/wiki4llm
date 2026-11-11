@@ -122,22 +122,22 @@ relabelled as text.
 Selected unreadable or oversized files abort before uploads. Defaults are 2 MB
 per file, 50 MB total, and 10,000 selected files per run; configurable ceilings
 are 20 MB, 200 MB, and 100,000 files. Limits are decimal bytes. Each selection
-budget can instead be explicitly disabled with the exact TOML string `"unlimited"`:
+budget can instead be explicitly disabled with the integer `-1`:
 
 ```toml
 # Top-level settings, before any [table]. Omit a setting to keep its default.
-max_files = "unlimited"
-max_file_bytes = "unlimited"
-max_total_bytes = "unlimited"
+max_files = -1
+max_file_bytes = -1
+max_total_bytes = -1
 ```
 
 Use the existing `wiki-rag --config wiki-rag.toml plan` command to inspect this
 selection before `index --apply` or `update --apply`. Budgets are independent;
 for example, disabling the total still leaves the default per-file/count budgets.
-Zero, negative numbers, booleans and other strings do not mean unlimited. Existing
-numeric values and their accepted ranges are unchanged. GitHub Actions offers
-[explicit boolean switches](docs/github-actions.md#selection-budgets) while keeping
-its numeric input types compatible.
+Zero, other negative numbers, floats and booleans are rejected. Positive integer
+ranges and defaults are unchanged. The legacy TOML string `"unlimited"` remains
+accepted for existing configurations; new configurations should use `-1`.
+GitHub Actions accepts the same [numeric sentinel](docs/github-actions.md#selection-budgets).
 
 **Unlimited selection budgets do not mean an unlimited service.** Remote publication
 still enforces the [protocol limits](gate/docs/ingestion-state-protocol.md), including

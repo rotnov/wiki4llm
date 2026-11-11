@@ -28,24 +28,27 @@ def unlimited_config(tmp_path, repo, remote=False):
         path = config_file(tmp_path, repo)
     path.write_text(
         path.read_text().replace(
-            "version = 1", "version = 1\n" + "\n".join(f'{key} = "unlimited"' for key in FIELDS)
+            "version = 1", "version = 1\n" + "\n".join(f"{key} = -1" for key in FIELDS)
         )
     )
     return load_config(path)
 
 
 @pytest.mark.parametrize("field", FIELDS)
-def test_explicit_unlimited_and_omitted_defaults(tmp_path, repo, field):
+@pytest.mark.parametrize("sentinel", ["-1", '"unlimited"'])
+def test_explicit_unlimited_and_omitted_defaults(tmp_path, repo, field, sentinel):
     cfg = load_config(config_file(tmp_path, repo))
     assert getattr(cfg, field) == FIELDS[field][0]
-    cfg = load_config(config_file(tmp_path, repo, extra=f'{field} = "unlimited"'))
+    cfg = load_config(config_file(tmp_path, repo, extra=f"{field} = {sentinel}"))
     assert getattr(cfg, field) is None
     for other in FIELDS.keys() - {field}:
         assert getattr(cfg, other) == FIELDS[other][0]
 
 
 @pytest.mark.parametrize("field", FIELDS)
-@pytest.mark.parametrize("value", ['"Unlimited"', '"0"', '""', "0", "-1", "true", "1.0"])
+@pytest.mark.parametrize(
+    "value", ['"Unlimited"', '"0"', '"-1"', '""', "0", "-2", "true", "false", "1.0", "-1.0"]
+)
 def test_unlimited_is_exact_and_not_an_invalid_number_alias(tmp_path, repo, field, value):
     with pytest.raises(RagError):
         load_config(config_file(tmp_path, repo, extra=f"{field} = {value}"))
@@ -126,6 +129,26 @@ def test_workflow_unlimited_switch_is_independent_and_numeric_compatible(tmp_pat
     assert getattr(workflow_config(params, tmp_path), field) == params[field.replace("_", "-")]
 
 
+@pytest.mark.parametrize("field", FIELDS)
+def test_workflow_numeric_unlimited_is_independent(tmp_path, field):
+    import json
+
+    params = workflow_parameters()
+    params[field.replace("_", "-")] = -1
+    cfg = workflow_config(json.loads(json.dumps(params)), tmp_path)
+    assert getattr(cfg, field) is None
+    for other in FIELDS.keys() - {field}:
+        assert getattr(cfg, other) == params[other.replace("_", "-")]
+
+
+@pytest.mark.parametrize("value", ["-1", "unlimited", -1.0, -2, 0, True, False])
+def test_workflow_numeric_limit_rejects_wrong_types_and_values(tmp_path, value):
+    params = workflow_parameters()
+    params["max-files"] = value
+    with pytest.raises(RagError):
+        workflow_config(params, tmp_path)
+
+
 @pytest.mark.parametrize("value", ["true", "false", 1, 0, None])
 def test_workflow_unlimited_requires_real_boolean(tmp_path, value):
     params = workflow_parameters()
@@ -136,7 +159,7 @@ def test_workflow_unlimited_requires_real_boolean(tmp_path, value):
 
 def test_workflow_switch_does_not_hide_invalid_numeric_input(tmp_path):
     params = workflow_parameters()
-    params.update({"unlimited-files": True, "max-files": -1})
+    params.update({"unlimited-files": True, "max-files": -2})
     with pytest.raises(RagError, match="bounds"):
         workflow_config(params, tmp_path)
 
