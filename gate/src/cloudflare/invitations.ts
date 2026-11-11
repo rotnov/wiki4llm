@@ -61,7 +61,9 @@ export class Invitations {
       expiresAt,
       "pending",
     );
-    return { id, url: origin + "/invite/" + token, expiresAt };
+    const email = emailAddress(a.email)!;
+    const prompt = `Connect wiki4llm MCP as a web connection: ${origin}/mcp.\nUse ${email} to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to ${workspaces.join(", ")} and retrieve a document.`;
+    return { id, url: origin + "/invite/" + token, expiresAt, prompt };
   }
   status(value: unknown) {
     const { id } = identifier.parse(value),
@@ -94,7 +96,29 @@ export class Invitations {
     });
     return { ok: true as const };
   }
-  accept(token: string, identity: Identity, mcpUrl: string) {
+  recipientAccess(
+    token: string,
+    identity: Identity,
+  ): { email: string; workspaces: string[] } | undefined {
+    const r = this.rows(
+      "SELECT email,issuer,status,accepted_key FROM invitations WHERE token_hash=?",
+      createHash("sha256").update(token).digest("hex"),
+    )[0];
+    if (
+      !r ||
+      r.status !== "accepted" ||
+      !identity.email ||
+      r.email !== identity.email ||
+      r.issuer !== identity.issuer ||
+      r.accepted_key !== identity.key
+    )
+      return undefined;
+    return {
+      email: identity.email,
+      workspaces: this.state.context(identity).allowed,
+    };
+  }
+  accept(token: string, identity: Identity) {
     return this.storage.transactionSync(() => {
       this.state.checkAuthority();
       const r = this.rows(
@@ -158,25 +182,43 @@ export class Invitations {
       );
       this.storage.sql.exec("UPDATE revision SET value=value+1 WHERE id=1");
       const workspaces = this.state.context(identity).allowed;
-      const prompt = `Connect wiki4llm MCP as a web connection: ${mcpUrl}.\nUse ${identity.email} to sign in; I will complete the browser authentication myself.\nAfter connecting, verify access to ${workspaces.join(", ")} and retrieve a document.`;
-      return {
-        email: identity.email,
-        workspaces,
-        prompt: workspaces.length ? prompt : "",
-      };
+      return { email: identity.email, workspaces };
     });
   }
 }
-export function invitationPage(): Response {
+export function invitationPage(access?: {
+  email: string;
+  workspaces: string[];
+}): Response {
   const nonce = randomUUID();
+  const escape = (text: string) =>
+    text.replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c]!,
+    );
+  const title = access
+    ? access.workspaces.length
+      ? "Access granted"
+      : "No accessible workspaces"
+    : "Activating your access…";
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>wiki4llm access</title>
-<style nonce="${nonce}">body{font:17px system-ui;margin:10vh auto;padding:24px;max-width:760px;background:#f5f7fa;color:#17212f}main{background:white;padding:32px;border-radius:16px;border:1px solid #dce2eb}h1{margin-top:0}textarea{box-sizing:border-box;width:100%;min-height:170px;padding:14px;font:15px/1.5 monospace;border:1px solid #aab8ca;border-radius:8px}button{padding:12px 20px;margin-top:12px;background:#174ec9;color:white;border:0;border-radius:8px;font:inherit}p{line-height:1.6}small{color:#526173}</style></head><body><main><small>wiki4llm</small><h1 id="title">Activating your access…</h1><p id="status" role="status">Checking your authenticated account and invitation.</p><section id="success" hidden><p>Paste this prompt into Claude or Codex.</p><textarea id="prompt" readonly aria-label="Agent connection prompt"></textarea><button id="copy" type="button">Copy prompt</button><p>You may be asked to sign in again when connecting MCP.</p></section><noscript>Enable JavaScript to activate this invitation. Opening this page alone does not grant access.</noscript></main>
-<script nonce="${nonce}">
-const title=document.getElementById('title'),status=document.getElementById('status'),prompt=document.getElementById('prompt');
-(async()=>{try{const response=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',credentials:'same-origin',redirect:'error'});if(!response.ok)throw new Error(response.status===409?'This invitation has already been used. Ask your administrator to check your access.':'This invitation cannot be activated. Check that you signed in with the invited email, or ask your administrator for a new link.');const result=await response.json();title.textContent=result.workspaces.length?'Access granted':'No accessible workspaces';status.textContent=result.email+' — '+(result.workspaces.join(', ')||'Existing restrictions prevent access. Contact your administrator.');if(result.prompt){prompt.value=result.prompt;document.getElementById('success').hidden=false;}}catch(error){title.textContent='Unable to activate access';status.textContent=error.message;}})();
-document.getElementById('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(prompt.value);document.getElementById('copy').textContent='Copied';}catch{prompt.focus();prompt.select();document.getElementById('copy').textContent='Select and copy the prompt';}});
-</script></body></html>`,
+<style nonce="${nonce}">body{font:17px system-ui;margin:10vh auto;padding:24px;max-width:760px;background:#f5f7fa;color:#17212f}main{background:white;padding:32px;border-radius:16px;border:1px solid #dce2eb}h1{margin-top:0}h2{font-size:18px;margin-top:32px}p{line-height:1.6}small{color:#526173}ul{padding:0;list-style:none}li{padding:16px;margin:10px 0;background:#f5f7fa;border:1px solid #dce2eb;border-radius:8px;overflow-wrap:anywhere}</style></head><body><main><small>wiki4llm</small><h1 id="title">${title}</h1><p id="status" role="status">${access ? escape(access.email) : "Checking your authenticated account and invitation."}</p><section id="access" ${access ? "" : "hidden"}><h2>Your workspaces</h2><ul id="workspaces">${access?.workspaces.map((w) => `<li>${escape(w)}</li>`).join("") ?? ""}</ul><p id="empty" ${access && !access.workspaces.length ? "" : "hidden"}>No workspaces are currently available. Contact your administrator.</p></section>${access ? "" : "<noscript>Enable JavaScript to activate this invitation. Opening this page alone does not grant access.</noscript>"}</main>
+${
+  access
+    ? ""
+    : `<script nonce="${nonce}">
+const title=document.getElementById('title'),status=document.getElementById('status'),list=document.getElementById('workspaces');
+(async()=>{try{const response=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',credentials:'same-origin',redirect:'error'});if(!response.ok)throw new Error(response.status===409?'This invitation has already been used. Reload to view your current access, or contact your administrator.':'This invitation cannot be activated. Check that you signed in with the invited email, or ask your administrator for a new link.');const result=await response.json();title.textContent=result.workspaces.length?'Access granted':'No accessible workspaces';status.textContent=result.email;for(const workspace of result.workspaces){const item=document.createElement('li');item.textContent=workspace;list.append(item);}document.getElementById('access').hidden=false;document.getElementById('empty').hidden=result.workspaces.length>0;}catch(error){title.textContent='Unable to activate access';status.textContent=error.message;}})();
+</script>`
+}</body></html>`,
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",

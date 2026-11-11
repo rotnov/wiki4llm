@@ -82,6 +82,7 @@ function safeResult(command: AdminCommand, value: unknown): unknown {
           .url()
           .refine((v) => /^https:\/\/[^/]+\/invite\/[a-f0-9]{64}$/.test(v)),
         expiresAt: z.number().int().positive(),
+        prompt: z.string().min(1).max(16000),
       })
       .strict()
       .parse(value);

@@ -190,6 +190,8 @@ test("invitation CLI supports create, inspect and revoke without accepting unexp
         ? {
             id: "123e4567-e89b-42d3-a456-426614174000",
             url: "https://gate.example/invite/" + "a".repeat(64),
+            prompt:
+              "Connect wiki4llm MCP as a web connection: https://gate.example/mcp.",
             expiresAt: Date.now() + 10000,
           }
         : command === "invite-status"

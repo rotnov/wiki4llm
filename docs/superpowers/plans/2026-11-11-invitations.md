@@ -3,7 +3,8 @@
 > Execute inline with behavior tests before runtime changes.
 
 **Goal:** An administrator creates an email-bound link with exact workspace grants;
-Cloudflare authentication activates it and displays a copyable English MCP prompt.
+Cloudflare authentication activates it and displays effective workspaces. The
+administrator receives the connection prompt to forward with the invitation.
 
 **Architecture:** SQLite Durable Object owns token hashes, expiry, revocation and
 atomic identity grants. A protected browser page performs a same-origin POST after
@@ -31,3 +32,9 @@ No invitation mail is sent automatically. Links expire after seven days by defau
 - Existing shared principals must not grant other identities new access.
 - Reader-front authentication must remain restricted to reader routes.
 - Prompt rendering must escape values and clipboard failure must permit manual copying.
+
+## Recipient UI correction
+
+The administrator forwards the connection prompt with the invitation. The
+recipient page displays only their email and effective workspace list. Reloading
+an accepted invitation reads current grants without granting or re-enabling access.

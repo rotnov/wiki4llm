@@ -418,18 +418,20 @@ export class GateDurableObject {
           !identity.key.startsWith("user:")
         )
           return response(403);
-        if (request.method === "GET") return invitationPage();
+        if (request.method === "GET")
+          return invitationPage(
+            this.invitations.recipientAccess(
+              path.slice("/invite/".length),
+              identity,
+            ),
+          );
         await readJSON(
           request,
           1024,
           AbortSignal.any([request.signal, AbortSignal.timeout(5000)]),
         );
         return Response.json(
-          this.invitations.accept(
-            path.slice("/invite/".length),
-            identity,
-            (this.env.READER_ORIGIN ?? this.env.PUBLIC_ORIGIN) + "/mcp",
-          ),
+          this.invitations.accept(path.slice("/invite/".length), identity),
         );
       }
       if (path === "/mcp")

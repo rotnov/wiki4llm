@@ -3,8 +3,9 @@
 An administrator creates a one-time link for an email and an explicit list of
 published workspaces. The recipient opens it, authenticates through Cloudflare
 Access, and receives reader permissions on their issuer-scoped identity. The
-success page shows the authenticated email, effective workspaces and an English
-prompt with a **Copy prompt** button for Claude or Codex. No separate acceptance
+success page shows the authenticated email and a list of effective workspaces.
+The creation result supplies an English MCP prompt for the administrator to
+forward to the teammate alongside the invitation link. No separate acceptance
 button is needed. Creating an invitation does not send mail.
 
 ## Operator commands
@@ -26,8 +27,8 @@ Create `invite.json` with this shape:
 npm run admin:worker -- "$GATE_ORIGIN" invite .data/invite.json
 ```
 
-The result is `{id, url, expiresAt}`. Share the URL privately with the intended
-recipient. The raw token is returned only on creation; the database stores its
+The result is `{id, url, expiresAt, prompt}`. Share the URL and connection prompt
+privately with the intended recipient. The raw token is returned only on creation; the database stores its
 SHA-256 hash. Lost links require a new invitation and revocation of the old one.
 The default lifetime is seven days; explicit lifetimes range from 60 seconds to
 30 days. Workspace slugs must already exist. Wildcards are rejected: resolve
@@ -72,15 +73,16 @@ or admin endpoints. Plain email previews and GET-only crawlers cannot consume
 invitations; an authenticated browser executing the page JavaScript can.
 
 The page has no external assets, sets `no-store`, `no-referrer`, `nosniff`, and a
-nonce-based CSP with framing blocked. Its script renders returned values using
-text nodes and a textarea. Clipboard failure leaves the prompt selected for manual
-copying. Keep invitation URL paths out of application/access log exports and
+nonce-based CSP with framing blocked. Its script renders returned workspace names as text nodes. The page does not
+repeat the setup prompt. Keep invitation URL paths out of application/access log exports and
 analytics; the page policy cannot control upstream proxy logs or browser history.
 
 Activation is a single SQLite transaction: validate token hash, expiry, email,
 issuer and account state; grant rights; bind identity; mark accepted. A second
-activation returns conflict, including a page reload. It never recreates revoked
-rights. If a response was lost, an operator can inspect invitation status and
+activation POST returns conflict. Reloading the invitation page after acceptance
+reads current grants only for the same authenticated recipient, without granting
+anything again. Disabled or unbound identities fail closed; other identities cannot
+read the recipient's grants. If a response was lost, an operator can inspect invitation status and
 identity permissions; do not repeatedly issue replacement grants blindly.
 
 Existing allow patterns and deny rules are retained. A new private principal is
@@ -90,16 +92,17 @@ principal no longer affect the moved identity. Disabled mappings or principals
 are not re-enabled. The existing combined 100-rule grant limit also applies to merged grants; exceeding
 it rolls back activation and leaves the invitation pending. Existing deny rules still win, and the page displays effective
 access, not a promise that every requested workspace was allowed. No-access results
-show an explanatory message without a misleading connection prompt.
+show an explanatory message.
 
 ## API ownership
 
 - `POST /admin/invitation`: creation payload above; administrator-only.
 - `POST /admin/invitation-status`: `{id}`; administrator-only.
 - `POST /admin/invitation-revoke`: `{id}`; administrator-only.
-- `GET /invite/{64-hex-token}`: authenticated browser page, no mutation.
+- `GET /invite/{64-hex-token}`: authenticated browser page, no mutation; an accepted invitation shows the
+  matching recipient's current workspace list.
 - `POST /invite/{64-hex-token}`: same-origin authenticated activation; returns
-  `{email, workspaces, prompt}`. Incorrect identity/expired/revoked tokens return
+  `{email, workspaces}`. Incorrect identity/expired/revoked tokens return
   403; replay returns 409. Invalid input returns 400.
 
 Implementation: `src/cloudflare/invitations.ts` owns persistence and rendering;
