@@ -60,6 +60,13 @@ job progress without manifest contents. A failed job leaves the prior publicatio
 active; a new writer lease supersedes an older pending job. No-op sync after completion
 returns `mode: applied` and the existing publication ID, with no new job.
 
+Job metadata includes `created_at` and nullable `finished_at` (Unix milliseconds),
+plus nullable `duration_ms`. Pending jobs and legacy jobs without a recorded end
+time have no duration. For an already-published workspace, the read-only MCP
+`status` tool exposes this metadata as `indexing`; `documents` still counts the
+active publication. This does not send a GitHub notification: a successful
+submission run alone does not establish successful publication.
+
 The gate's read credential only checks readiness; it never uploads, attaches or
 performs cleanup. The next publisher sync cleans obsolete owned resources before
 submission, retaining all operation IDs selected for the current snapshot. No journal

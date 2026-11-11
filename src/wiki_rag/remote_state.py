@@ -273,6 +273,9 @@ class RemoteState:
                 or not re.fullmatch(r"[0-9a-f-]{36}", job["publication_id"])
             ):
                 raise AuthorityError("invalid authority job publication")
+            for field in ("created_at", "finished_at", "duration_ms"):
+                if field in job and job[field] is not None:
+                    number(job[field])
         return result
 
     def load(self):

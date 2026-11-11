@@ -42,7 +42,8 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
     "Search authorized workspaces. QMD lex is model-free; OpenAI modes control embedding/text weights.",
   get: "Read an exact document reference returned by query.",
   multi_get: "Read up to 20 exact authorized document references.",
-  status: "Get counts for authorized workspaces.",
+  status:
+    "Get published document counts and available background indexing status for authorized workspaces.",
 };
 export type ToolName = keyof typeof toolSchemas;
 function parse<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {

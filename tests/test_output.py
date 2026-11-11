@@ -39,6 +39,26 @@ def result(mode):
     }
 
 
+def test_status_summary_preserves_safe_job_timing():
+    from wiki_rag.output import summarize
+
+    job = {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "status": "failed",
+        "total": 2,
+        "completed": 1,
+        "created_at": 1000,
+        "finished_at": 3000,
+        "duration_ms": 2000,
+        "error": "provider_metadata",
+        "private": "must not appear",
+    }
+    summary = summarize({"mode": "status", "job": job})
+    assert summary["job"]["duration_ms"] == 2000
+    assert summary["job"]["created_at"] == 1000 and summary["job"]["finished_at"] == 3000
+    assert "private" not in summary["job"]
+
+
 @pytest.mark.parametrize("mode", ["plan", "sync"])
 def test_github_stdout_contains_counts_without_paths(mode, monkeypatch, capsys, tmp_path):
     raw = result("preview" if mode == "plan" else "applied")

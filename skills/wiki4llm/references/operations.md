@@ -33,7 +33,7 @@ uv run wiki-rag --config "$RAG_CONFIG" index --apply
 state. A remote preview reads the authority but makes no provider writes. Inspect
 selection before an approved upload. Ordinary candidates are Git-tracked;
 explicit verified LFS and generator sources follow
-[derived sources](../../../../docs/derived-sources.md), never a generic untracked-file bypass.
+[derived sources](https://github.com/rotnov/wiki4llm/blob/main/docs/derived-sources.md), never a generic untracked-file bypass.
 include globs must match, an optional extension allowlist further restricts them,
 and excludes win. Remote mode
 requires full committed history and literal HEAD bytes or the configured derived proof, with ancestry
@@ -67,6 +67,13 @@ enabling an authorized push trigger. Automatic pushes must be from the default b
 be allowed by the selected GitHub environment. PR/tag contexts are rejected. The
 dispatched workflow branch and each collection's configured source branch are
 different: report the actual indexed revision, not the workflow's revision.
+
+For an already-published workspace, MCP `status` also exposes the latest `indexing`
+job with progress, sanitized errors and timing. `documents` counts the active
+publication, not the pending candidate. `finished_at` and `duration_ms` are null
+while pending and for legacy jobs whose finish time was not recorded. A failed
+job is terminal; do not describe it as still indexing or infer its duration from
+the shorter GitHub submission run. This status does not itself notify GitHub.
 
 For a requested pre-merge test, use the existing manual workflow path; do not invent
 a separate repository or corpus unless isolation is requested. Confirm whether the

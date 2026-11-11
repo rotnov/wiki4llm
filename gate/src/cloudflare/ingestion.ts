@@ -248,6 +248,14 @@ export class IngestionState {
  CREATE TABLE IF NOT EXISTS ingest_receipts(workspace TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,result_json TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(workspace,request_id));
  CREATE TABLE IF NOT EXISTS ingest_jobs(workspace TEXT PRIMARY KEY,id TEXT NOT NULL,status TEXT NOT NULL,owner TEXT NOT NULL,epoch INTEGER NOT NULL,revision INTEGER NOT NULL,manifest_json TEXT NOT NULL,binding_json TEXT NOT NULL,created_at INTEGER NOT NULL,next_at INTEGER NOT NULL,total INTEGER NOT NULL,completed INTEGER NOT NULL,store_index INTEGER NOT NULL DEFAULT 0,cursor TEXT,cursors_json TEXT NOT NULL DEFAULT '[]',attempts INTEGER NOT NULL DEFAULT 0,error TEXT,publication_id TEXT);
  CREATE TABLE IF NOT EXISTS ingest_job_files(workspace TEXT NOT NULL,file_id TEXT NOT NULL,operation_id TEXT NOT NULL,store TEXT NOT NULL,attributes_json TEXT NOT NULL,ready INTEGER NOT NULL,PRIMARY KEY(workspace,file_id));`);
+    if (
+      !this.rows("PRAGMA table_info(ingest_jobs)").some(
+        (r) => r.name === "finished_at",
+      )
+    )
+      this.storage.sql.exec(
+        "ALTER TABLE ingest_jobs ADD COLUMN finished_at INTEGER",
+      );
   }
   private rows(q: string, ...a: SqlStorageValue[]) {
     return this.storage.sql.exec(q, ...a).toArray();
@@ -822,22 +830,27 @@ export class IngestionState {
 
   private invalidateJob(w: string, status: "revoked" | "superseded") {
     this.storage.sql.exec(
-      "UPDATE ingest_jobs SET status=?,next_at=0 WHERE workspace=? AND status='pending'",
+      "UPDATE ingest_jobs SET status=?,next_at=0,finished_at=? WHERE workspace=? AND status='pending'",
       status,
+      Date.now(),
       w,
     );
   }
-  private jobStatus(w: string) {
+  jobStatus(w: string) {
     const r = this.rows(
-      "SELECT id,status,total,completed,error,publication_id FROM ingest_jobs WHERE workspace=?",
+      "SELECT id,status,total,completed,error,publication_id,created_at,finished_at FROM ingest_jobs WHERE workspace=?",
       w,
     )[0];
     if (!r) return null;
+    const finished = r.finished_at === null ? null : Number(r.finished_at);
     return {
       id: String(r.id),
       status: String(r.status),
       total: Number(r.total),
       completed: Number(r.completed),
+      created_at: Number(r.created_at),
+      finished_at: finished,
+      duration_ms: finished === null ? null : finished - Number(r.created_at),
       ...(r.error ? { error: String(r.error) } : {}),
       ...(r.publication_id ? { publication_id: String(r.publication_id) } : {}),
     };
@@ -967,7 +980,8 @@ export class IngestionState {
       }
       if (Number(r.created_at) + 86400000 <= Date.now()) {
         this.storage.sql.exec(
-          "UPDATE ingest_jobs SET status='failed',error='finalization_timeout',next_at=0 WHERE workspace=?",
+          "UPDATE ingest_jobs SET status='failed',error='finalization_timeout',next_at=0,finished_at=? WHERE workspace=?",
+          Date.now(),
           w,
         );
         return null;
@@ -1059,8 +1073,9 @@ export class IngestionState {
       job.workspace,
     );
     this.storage.sql.exec(
-      "UPDATE ingest_jobs SET status='complete',completed=total,publication_id=?,revision=revision+1,next_at=0,error=NULL,manifest_json='' WHERE workspace=?",
+      "UPDATE ingest_jobs SET status='complete',completed=total,publication_id=?,revision=revision+1,next_at=0,error=NULL,manifest_json='',finished_at=? WHERE workspace=?",
       manifest.publication_id,
+      Date.now(),
       job.workspace,
     );
     this.storage.sql.exec(
@@ -1170,13 +1185,14 @@ export class IngestionState {
         job.workspace,
       );
       this.storage.sql.exec(
-        "UPDATE ingest_jobs SET status=?,revision=revision+1,error=?,attempts=attempts+1,next_at=? WHERE workspace=?",
+        "UPDATE ingest_jobs SET status=?,revision=revision+1,error=?,attempts=attempts+1,next_at=?,finished_at=? WHERE workspace=?",
         retry ? "pending" : "failed",
         code,
         retry
           ? Date.now() +
               Math.min(900000, 30000 * 2 ** Math.min(job.attempts, 5))
           : 0,
+        retry ? null : Date.now(),
         job.workspace,
       );
     });

@@ -506,3 +506,26 @@ def test_real_workerd_mixed_derived_origins_are_immutable_and_background_verifie
         assert "origin" not in files["input.md"]
         assert run(cfg, "index", apply=True, provider=provider, remote=remote)["mode"] == "applied"
     assert provider.uploads == 3
+
+
+def test_job_timing_migration_preserves_legacy_publication_without_fabricating_duration(
+    tmp_path, repo, bridge
+):
+    tracked(repo, "a.md", "hello")
+    git(repo, "commit", "-m", "first")
+    cfg = remote_config(tmp_path, repo)
+    provision(bridge, cfg)
+    provider = FakeProvider()
+    with RemoteState(cfg, transport=bridge) as remote:
+        run(cfg, "index", apply=True, provider=provider, remote=remote)
+    bridge.complete(provider)
+    with RemoteState(cfg, transport=bridge) as remote:
+        before = remote.publication()
+        job = remote.status()["job"]
+        assert job["duration_ms"] == job["finished_at"] - job["created_at"]
+    bridge.exchange({"control": "restart", "legacy_timing": True})
+    with RemoteState(cfg, transport=bridge) as remote:
+        job = remote.status()["job"]
+        assert job["status"] == "complete" and job["created_at"] > 0
+        assert job["finished_at"] is None and job["duration_ms"] is None
+        assert remote.publication() == before

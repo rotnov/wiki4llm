@@ -98,6 +98,7 @@ async function setup(branch: string | null = "main") {
       headers: {
         "cf-access-jwt-assertion": token,
         "content-type": "application/json",
+        accept: "application/json, text/event-stream",
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -396,6 +397,11 @@ for (const change of ["revoke", "disable", "new-writer"]) {
         status.job.status,
         change === "new-writer" ? "superseded" : "revoked",
       );
+      assert.ok(status.job.finished_at >= status.job.created_at);
+      assert.equal(
+        status.job.duration_ms,
+        status.job.finished_at - status.job.created_at,
+      );
     } finally {
       await f.mf.dispose();
     }
@@ -415,6 +421,11 @@ test("terminal indexing failure and metadata mismatch never publish", async () =
       const status = await f.status();
       assert.equal(status.publication, null);
       assert.equal(status.job.status, "failed");
+      assert.ok(status.job.finished_at >= status.job.created_at);
+      assert.equal(
+        status.job.duration_ms,
+        status.job.finished_at - status.job.created_at,
+      );
     } finally {
       await f.mf.dispose();
     }
@@ -435,6 +446,63 @@ test("metadata failure names the field and state without leaking its value", asy
     assert.equal(status.publication, null);
     assert.equal(status.job.error, "provider_metadata_commit_completed");
     assert.ok(!JSON.stringify(status.job).includes("private-value"));
+  } finally {
+    await f.mf.dispose();
+  }
+});
+
+test("job timing is stable while pending and records completion duration", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    const pending = (await f.status()).job;
+    assert.ok(Number.isSafeInteger(pending.created_at));
+    assert.equal(pending.finished_at, null);
+    assert.equal(pending.duration_ms, null);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual((await f.status()).job, pending);
+    await f.release();
+    f.setState("completed");
+    await f.tick();
+    const done = (await f.status()).job;
+    assert.ok(done.finished_at >= done.created_at);
+    assert.equal(done.duration_ms, done.finished_at - done.created_at);
+  } finally {
+    await f.mf.dispose();
+  }
+});
+
+test("authorized MCP readers see the latest indexing job without publisher credentials", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    await f.release();
+    f.setState("completed");
+    await f.tick();
+    await f.ok(
+      "/admin/principal",
+      { id: "reader", enabled: true, grants: { allow: ["demo"], deny: [] } },
+      "user:admin",
+    );
+    await f.ok(
+      "/admin/identity",
+      { key: "user:reader", principal: "reader", enabled: true },
+      "user:admin",
+    );
+    const request = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "status", arguments: { workspaces: ["demo"] } },
+    };
+    const result = await f.ok("/mcp", request, "user:reader");
+    const w = result.result.structuredContent.workspaces[0];
+    assert.equal(w.documents, 1);
+    assert.equal(w.indexing.status, "complete");
+    assert.ok(w.indexing.finished_at >= w.indexing.created_at);
+    const denied = await f.ok("/mcp", request, "user:other");
+    assert.equal(denied.result.isError, true);
+    assert.ok(!JSON.stringify(denied).includes("indexing"));
   } finally {
     await f.mf.dispose();
   }

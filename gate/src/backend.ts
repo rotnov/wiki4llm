@@ -1,6 +1,17 @@
 import type { Workspace } from "./state-contract.js";
 import type { SourceOrigin } from "./manifest.js";
 export type SearchMode = "lex" | "vec" | "hybrid";
+export interface IndexingStatus {
+  id: string;
+  status: string;
+  total: number;
+  completed: number;
+  created_at: number;
+  finished_at: number | null;
+  duration_ms: number | null;
+  error?: string;
+  publication_id?: string;
+}
 export interface Document {
   collection: string;
   path: string;
@@ -39,5 +50,10 @@ export interface Backend {
   status(
     workspace: Workspace,
     signal: AbortSignal,
-  ): Promise<{ documents: number; vectors: number | null; backend?: string }>;
+  ): Promise<{
+    documents: number;
+    vectors: number | null;
+    backend?: string;
+    indexing?: IndexingStatus;
+  }>;
 }

@@ -83,7 +83,7 @@ async function request(input) {
   }
   if (input.control === "restart") {
     await mf.dispose();
-    if (input.expire) {
+    if (input.expire || input.legacy_timing) {
       function files(path) {
         return readdirSync(path, { withFileTypes: true }).flatMap((e) =>
           e.isDirectory() ? files(join(path, e.name)) : [join(path, e.name)],
@@ -92,7 +92,8 @@ async function request(input) {
       const db = new DatabaseSync(
         files(persist).find((p) => p.endsWith(".sqlite")),
       );
-      db.exec("UPDATE ingest_authorities SET lease_expires=0");
+      if(input.expire)db.exec("UPDATE ingest_authorities SET lease_expires=0");
+      if(input.legacy_timing)db.exec("ALTER TABLE ingest_jobs DROP COLUMN finished_at");
       db.close();
     }
     mf = new Miniflare(options);

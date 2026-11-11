@@ -12,7 +12,18 @@ def summarize(result):
         summary["job"] = {
             k: v
             for k, v in result["job"].items()
-            if k in {"id", "status", "total", "completed", "error", "publication_id"}
+            if k
+            in {
+                "id",
+                "status",
+                "total",
+                "completed",
+                "error",
+                "publication_id",
+                "created_at",
+                "finished_at",
+                "duration_ms",
+            }
         }
     summary["collections"] = {}
     for name, collection in result.get("collections", {}).items():

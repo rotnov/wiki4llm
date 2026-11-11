@@ -464,6 +464,7 @@ export class GateDurableObject {
           );
           const backend = new OpenAIBackend({
             env,
+            indexing: (w) => this.ingestion.jobStatus(w.id),
             transport: (url, init) =>
               fetch(url, { ...init, redirect: "manual" }),
             snapshot: (w) => {

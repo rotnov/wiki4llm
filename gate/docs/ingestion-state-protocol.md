@@ -328,13 +328,22 @@ ID and creates no new job. The publisher status command reports:
     "id": "00000000-0000-4000-8000-000000000000",
     "status": "pending",
     "total": 281,
-    "completed": 200
+    "completed": 200,
+    "created_at": 1790000000000,
+    "finished_at": null,
+    "duration_ms": null
   }
 }
 ```
 
 Statuses are `pending`, `complete`, `failed`, `superseded` and `revoked`.
 Failures carry a sanitized `error` code; completion carries `publication_id`.
+Timestamps use Unix milliseconds. Terminal transitions record `finished_at` and
+`duration_ms = finished_at - created_at`; legacy terminal jobs keep these fields
+null because their completion time was not recorded. Timing fields are stable
+between state transitions, including across fenced snapshot reads. Authorized MCP
+readers can inspect the latest job as `indexing` in workspace `status`, alongside
+the active publication counts. Before the first publication, use publisher status.
 Only the latest job is retained per workspace. A subsequent submission replaces
 that job's candidate manifest and readiness rows; immutable file ownership remains.
 

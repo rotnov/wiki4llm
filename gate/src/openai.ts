@@ -1,5 +1,11 @@
 import { z } from "zod";
-import type { Backend, Document, Hit, SearchMode } from "./backend.js";
+import type {
+  Backend,
+  Document,
+  Hit,
+  SearchMode,
+  IndexingStatus,
+} from "./backend.js";
 import type { Workspace } from "./state-contract.js";
 import type { OpenAISnapshot } from "./manifest.js";
 import { GateError } from "./errors.js";
@@ -17,6 +23,7 @@ export interface OpenAIOptions {
   transport?: (url: string, init: RequestInit) => Promise<Response>;
   env?: Record<string, string | undefined>;
   snapshot?: (workspace: Workspace) => OpenAISnapshot;
+  indexing?: (workspace: Workspace) => IndexingStatus | null;
   timeoutMs?: number;
 }
 export class OpenAIBackend implements Backend {
@@ -24,8 +31,10 @@ export class OpenAIBackend implements Backend {
   private readonly env: Record<string, string | undefined>;
   private readonly resolveSnapshot: OpenAIOptions["snapshot"];
   private readonly timeoutMs: number;
+  private readonly resolveIndexing: OpenAIOptions["indexing"];
   constructor(options: OpenAIOptions = {}) {
     this.resolveSnapshot = options.snapshot;
+    this.resolveIndexing = options.indexing;
     this.transport = options.transport ?? ((url, init) => fetch(url, init));
     this.env = options.env ?? process.env;
     this.timeoutMs = options.timeoutMs ?? 15000;
@@ -276,9 +285,15 @@ export class OpenAIBackend implements Backend {
   async status(
     w: Workspace,
     signal: AbortSignal,
-  ): Promise<{ documents: number; vectors: null; backend: "openai" }> {
+  ): Promise<{
+    documents: number;
+    vectors: null;
+    backend: "openai";
+    indexing?: IndexingStatus;
+  }> {
     if (signal.aborted) throw new GateError("CANCELLED");
     const s = this.snapshot(w);
+    const indexing = this.resolveIndexing?.(w);
     return {
       documents: Object.values(s.manifest.collections).reduce(
         (n, c) => n + Object.keys(c.files).length,
@@ -286,6 +301,7 @@ export class OpenAIBackend implements Backend {
       ),
       vectors: null,
       backend: "openai",
+      ...(indexing ? { indexing } : {}),
     };
   }
 }
