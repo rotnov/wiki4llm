@@ -175,7 +175,13 @@ def stage_files(cfg, state, selected, provider):
                         ),
                         "keys",
                     )
-                    reason = f"attributes.{field} mismatch"
+                    issue = (
+                        "missing"
+                        if field in expected
+                        and (not isinstance(actual, dict) or field not in actual)
+                        else "mismatch"
+                    )
+                    reason = f"attributes.{field} {issue}"
                 elif attached.get("status") not in {
                     "in_progress",
                     "completed",
@@ -186,9 +192,11 @@ def stage_files(cfg, state, selected, provider):
                 elif attached.get("vector_store_id", store) != store:
                     reason = "vector_store_id mismatch"
                 if reason:
+                    empty_attributes = sum(item.get("attributes") == {} for item in found.values())
                     raise RagError(
                         f"unresolved attachment outcome: {len(found)}/{len(uncertain)} found; "
-                        f"{reason}; retry reconciliation later"
+                        f"{empty_attributes} empty attribute records; {reason}; "
+                        "retry reconciliation later"
                     )
                 ops[oid]["phase"] = "attached"
                 confirmed.append(oid)

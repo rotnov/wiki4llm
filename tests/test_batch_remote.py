@@ -201,12 +201,14 @@ def test_missing_uncertain_attachment_is_never_recreated(tmp_path, repo, monkeyp
     with pytest.raises(RagError):
         invoke(cfg, authority, provider, monkeypatch)
     provider.attachments.clear()
-    with pytest.raises(RagError, match="0/1 found; missing attachment"):
+    with pytest.raises(RagError, match="0/1 found; 0 empty attribute records; missing attachment"):
         invoke(cfg, authority, provider, monkeypatch)
     assert len(provider.batches) == 1
 
 
-@pytest.mark.parametrize("field", ["id", "vector_store_id", "attributes", "status"])
+@pytest.mark.parametrize(
+    "field", ["id", "vector_store_id", "attributes", "status", "extra_attributes"]
+)
 def test_uncertain_attachment_diagnostics_identify_boundary_without_values(
     tmp_path, repo, monkeypatch, field
 ):
@@ -215,13 +217,37 @@ def test_uncertain_attachment_diagnostics_identify_boundary_without_values(
     with pytest.raises(RagError):
         invoke(cfg, authority, provider, monkeypatch)
     item = next(iter(provider.attachments.values()))
-    item[field] = {"private": "value"} if field == "attributes" else "private-value"
+    if field == "extra_attributes":
+        item["attributes"]["private"] = "value"
+    else:
+        item[field] = {"private": "value"} if field == "attributes" else "private-value"
     with pytest.raises(RagError) as raised:
         invoke(cfg, authority, provider, monkeypatch)
     message = str(raised.value)
-    assert "1/1 found" in message and field in message
+    assert "1/1 found" in message
+    if field == "extra_attributes":
+        assert "attributes.keys mismatch" in message
+    else:
+        assert field in message
+    if field == "attributes":
+        assert "missing" in message and "0 empty attribute records" in message
     assert "private" not in message and "0.md" not in message and "file-" not in message
     assert len(provider.batches) == 1 and provider.uploads == 1
+
+
+def test_uncertain_empty_metadata_reports_aggregate_count(tmp_path, repo, monkeypatch):
+    cfg, authority, provider = setup_batch(tmp_path, repo, 2)
+    provider.unknown_attach = True
+    with pytest.raises(RagError):
+        invoke(cfg, authority, provider, monkeypatch)
+    for item in provider.attachments.values():
+        item["attributes"] = {}
+    with pytest.raises(
+        RagError, match="2/2 found; 2 empty attribute records; attributes.repository missing"
+    ):
+        invoke(cfg, authority, provider, monkeypatch)
+    assert len(provider.batches) == 1 and provider.uploads == 2
+    assert {op["phase"] for op in authority.ops.values()} == {"attach_pending"}
 
 
 def test_batch_provider_request_metadata_and_paginated_reconciliation(tmp_path, repo, monkeypatch):
