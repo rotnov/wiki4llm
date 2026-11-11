@@ -1,5 +1,6 @@
 import type { DurableObjectState } from "@cloudflare/workers-types/index.js";
 import { z } from "zod";
+import { Invitations, invitationPath, invitationPage } from "./invitations.js";
 import { AccessVerifier, validIdentityKey, type Identity } from "./access.js";
 import { IngestionState } from "./ingestion.js";
 import { BackgroundFinalizer } from "./background.js";
@@ -20,6 +21,7 @@ export interface Env {
   PUBLIC_ORIGIN: string;
   ADMIN_IDENTITIES: string;
   MCP_FORWARDER?: string;
+  READER_ORIGIN?: string;
   GATE: Binding;
   [key: string]: unknown;
 }
@@ -35,6 +37,9 @@ const response = (status: number) =>
     },
   );
 const paths = new Set([
+  "/admin/invitation",
+  "/admin/invitation-status",
+  "/admin/invitation-revoke",
   "/identity",
   "/mcp",
   "/admin/principal",
@@ -47,10 +52,19 @@ const paths = new Set([
 ]);
 function route(request: Request, env: Env): string | Response {
   const url = new URL(request.url);
+  const invite = invitationPath(url.pathname);
+  const requestOrigin = request.headers.get("origin");
+  const browserOrigin = env.READER_ORIGIN ?? env.PUBLIC_ORIGIN;
+  if (
+    invite &&
+    ((request.method === "POST" && requestOrigin !== browserOrigin) ||
+      (requestOrigin !== null && requestOrigin !== browserOrigin))
+  )
+    return response(403);
   if (
     !/^https:\/\/[^/]+$/.test(env.PUBLIC_ORIGIN) ||
     url.origin !== env.PUBLIC_ORIGIN ||
-    request.headers.has("origin") ||
+    (!invite && request.headers.has("origin")) ||
     request.headers.has("mcp-session-id")
   )
     return response(403);
@@ -59,7 +73,7 @@ function route(request: Request, env: Env): string | Response {
       url.pathname,
     );
   if (
-    (!paths.has(url.pathname) && !ingest) ||
+    (!paths.has(url.pathname) && !ingest && !invite) ||
     (url.search &&
       url.pathname !== "/admin/status" &&
       !url.pathname.endsWith("/publication"))
@@ -76,7 +90,12 @@ function route(request: Request, env: Env): string | Response {
     (ingest && /\/(status|publication)$/.test(url.pathname))
       ? "GET"
       : "POST";
-  if (request.method !== method) return response(405);
+  if (
+    invite
+      ? !["GET", "POST"].includes(request.method)
+      : request.method !== method
+  )
+    return response(405);
   return url.pathname;
 }
 let outerVerifier: AccessVerifier | undefined;
@@ -198,6 +217,7 @@ async function readJSON(
 }
 export class GateDurableObject {
   private readonly state: CloudState;
+  private readonly invitations: Invitations;
   private readonly verifier: AccessVerifier;
   private readonly readerVerifier?: AccessVerifier;
   private readonly forwarderIdentity?: string;
@@ -230,6 +250,15 @@ export class GateDurableObject {
       env.ACCESS_AUDIENCE,
       forwarder?.issuer,
     );
+    if (
+      env.READER_ORIGIN &&
+      (!forwarder ||
+        !/^https:\/\/[^/]+$/.test(env.READER_ORIGIN) ||
+        new URL(env.READER_ORIGIN).origin !== env.READER_ORIGIN ||
+        env.READER_ORIGIN === env.PUBLIC_ORIGIN)
+    )
+      throw new GateError("INVALID_INPUT");
+    this.invitations = new Invitations(ctx.storage, this.state);
     this.ingestion = new IngestionState(ctx.storage, this.state);
     this.background = new BackgroundFinalizer(ctx.storage, this.ingestion, env);
   }
@@ -248,7 +277,8 @@ export class GateDurableObject {
     if (
       !assertion ||
       !this.readerVerifier ||
-      !["/mcp", "/identity"].includes(new URL(request.url).pathname)
+      (!["/mcp", "/identity"].includes(new URL(request.url).pathname) &&
+        !invitationPath(new URL(request.url).pathname))
     )
       throw new GateError("UNAUTHENTICATED");
     const reader = await this.readerVerifier.verify(assertion);
@@ -379,6 +409,29 @@ export class GateDurableObject {
         { headers: { "Cache-Control": "no-store" } },
       );
     try {
+      if (invitationPath(path)) {
+        const targetIssuer = this.env.READER_ORIGIN
+          ? this.readerVerifier!.issuer
+          : this.env.ACCESS_ISSUER;
+        if (
+          identity.issuer !== targetIssuer ||
+          !identity.key.startsWith("user:")
+        )
+          return response(403);
+        if (request.method === "GET") return invitationPage();
+        await readJSON(
+          request,
+          1024,
+          AbortSignal.any([request.signal, AbortSignal.timeout(5000)]),
+        );
+        return Response.json(
+          this.invitations.accept(
+            path.slice("/invite/".length),
+            identity,
+            (this.env.READER_ORIGIN ?? this.env.PUBLIC_ORIGIN) + "/mcp",
+          ),
+        );
+      }
       if (path === "/mcp")
         return await this.queue.run(async (signal) => {
           const parsed = await readJSON(
@@ -509,6 +562,21 @@ export class GateDurableObject {
         this.admin(identity);
         this.state.checkAuthority();
         switch (path) {
+          case "/admin/invitation":
+            return Response.json(
+              this.invitations.create(
+                value,
+                this.env.READER_ORIGIN
+                  ? this.readerVerifier!.issuer
+                  : this.env.ACCESS_ISSUER,
+                this.env.READER_ORIGIN ?? this.env.PUBLIC_ORIGIN,
+                identity,
+              ),
+            );
+          case "/admin/invitation-status":
+            return Response.json(this.invitations.status(value));
+          case "/admin/invitation-revoke":
+            return Response.json(this.invitations.revoke(value));
           case "/admin/publisher": {
             this.ingestion.setPublisher(value);
             break;
@@ -550,7 +618,9 @@ export class GateDurableObject {
       return response(
         error instanceof GateError
           ? error.code === "CONFLICT" &&
-            (path.startsWith("/ingest/") ||
+            (invitationPath(path) ||
+              path.startsWith("/admin/invitation") ||
+              path.startsWith("/ingest/") ||
               path === "/admin/ingestion" ||
               path === "/admin/import")
             ? 409

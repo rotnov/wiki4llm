@@ -289,9 +289,9 @@ On the backend, optional `MCP_FORWARDER` is a JSON deployment binding containing
 team issuer) and `audience` (the new MCP application's audience). These are
 nonsecret identifiers. The backend independently validates both the original
 transport assertion and the separately forwarded signed user assertion. The
-user must be human, both assertions must remain valid, and only `/mcp` and
-read-only `/identity` are accepted. A transport credential alone cannot access
-either surface. Existing direct authentication and publisher endpoints remain
+user must be human and both assertions must remain valid. Reader routes are
+`/mcp`, read-only `/identity`, and the authenticated `/invite/{token}` browser
+flow. A transport credential alone cannot access these surfaces. Existing direct authentication and publisher endpoints remain
 unchanged; forwarded requests cannot administer or ingest.
 
 Map the verified new identity explicitly with `/admin/identity`, adding its
@@ -306,7 +306,7 @@ Pagination remains scoped to that issuer. Principal grants, manifests, store
 reservations and ingestion ownership are shared unchanged; the persisted primary
 issuer/audience guard is not migrated or relaxed.
 
-The front forwards only `/mcp` POST and `/identity` GET, to the fixed backend,
+The front forwards `/mcp` POST, `/identity` GET, and invitation GET/POST to the fixed backend,
 without following redirects. It strips client credentials/cookies, injects the
 transport credentials, and forwards the signed edge assertion in
 `X-Wiki-Rag-Reader-Assertion`. Backend cookies and credential headers never reach
@@ -345,3 +345,8 @@ immediate backend activation outside active ingestion attempts.
 Preserve unrelated policies and the permanent publisher throughout. A requirement
 for uninterrupted readers needs a separately designed overlap mechanism rather
 than claiming this sequence is seamless.
+
+## Reader invitation links
+
+See [email-bound invitation links](invitations.md) for create/status/revoke commands,
+browser authentication prerequisites, reader-front configuration and acceptance checks.

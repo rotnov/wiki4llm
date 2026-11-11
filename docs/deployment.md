@@ -221,3 +221,8 @@ Already-dispatched provider calls cannot be cancelled by the lease. The document
 `upload_ready` maintenance limitation and journal quota still apply. Back up and
 recover DO state together with operator policy/bindings; a backup/restore drill is
 an operator acceptance task, not a consequence of a successful deploy command.
+
+## Invite readers
+
+After deployment, follow the [invitation guide](../gate/docs/invitations.md) to
+create email-bound links and verify browser activation and MCP access.

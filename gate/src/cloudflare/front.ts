@@ -26,7 +26,18 @@ function origin(value: string): string {
 export default {
   async fetch(request: Request, env: FrontEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (request.headers.has("origin") || request.headers.has("mcp-session-id"))
+    const invite = /^\/invite\/[a-f0-9]{64}$/.test(url.pathname);
+    const requestOrigin = request.headers.get("origin");
+    if (
+      invite &&
+      ((request.method === "POST" && requestOrigin !== env.PUBLIC_ORIGIN) ||
+        (requestOrigin !== null && requestOrigin !== env.PUBLIC_ORIGIN))
+    )
+      return fail(403);
+    if (
+      (!invite && request.headers.has("origin")) ||
+      request.headers.has("mcp-session-id")
+    )
       return fail(403);
     try {
       if (
@@ -37,11 +48,15 @@ export default {
     } catch {
       return fail(503);
     }
-    if (url.search || !["/mcp", "/identity"].includes(url.pathname))
+    if (
+      url.search ||
+      (!invite && !["/mcp", "/identity"].includes(url.pathname))
+    )
       return fail(404);
     if (
       (url.pathname === "/mcp" && request.method !== "POST") ||
-      (url.pathname === "/identity" && request.method !== "GET")
+      (url.pathname === "/identity" && request.method !== "GET") ||
+      (invite && !["GET", "POST"].includes(request.method))
     )
       return fail(405);
     const assertion = request.headers.get("cf-access-jwt-assertion");
@@ -58,6 +73,7 @@ export default {
       "CF-Access-Client-Secret": env.BRIDGE_CLIENT_SECRET,
       "X-Wiki-Rag-Reader-Assertion": assertion,
     });
+    if (invite && requestOrigin) headers.set("Origin", requestOrigin);
     for (const key of ["content-type", "accept", "mcp-protocol-version"]) {
       const value = request.headers.get(key);
       if (value) headers.set(key, value);
@@ -79,7 +95,14 @@ export default {
       );
       if (upstream.status >= 300 && upstream.status < 400) return fail(502);
       const responseHeaders = new Headers({ "Cache-Control": "no-store" });
-      for (const key of ["content-type", "retry-after", "allow"]) {
+      for (const key of [
+        "content-type",
+        "retry-after",
+        "allow",
+        "content-security-policy",
+        "referrer-policy",
+        "x-content-type-options",
+      ]) {
         const value = upstream.headers.get(key);
         if (value) responseHeaders.set(key, value);
       }

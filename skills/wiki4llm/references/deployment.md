@@ -101,8 +101,9 @@ is the reader front in `gate/src/cloudflare/front.ts`:
 
 Use `gate/docs/cloudflare.md` and the front/forwarding tests for the exact binding
 contract. Do not rewrite the forwarding headers or bypass either JWT validation.
-The front deliberately rejects browser Origin and MCP session headers; test with
-a compatible stateless MCP client, not a direct browser JavaScript fetch.
+MCP routes reject browser Origin and MCP session headers; test retrieval with
+a compatible stateless MCP client. Only invitation activation accepts the exact
+same-origin browser POST; see [invitations](invitations.md) for deployment prerequisites.
 
 ## Upgrades and rollback
 

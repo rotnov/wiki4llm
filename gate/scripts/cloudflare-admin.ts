@@ -1,7 +1,11 @@
 import { z } from "zod";
+import { emailAddress } from "../src/email.js";
 import { readFile, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 const commands = {
+  invite: "/admin/invitation",
+  "invite-status": "/admin/invitation-status",
+  "invite-revoke": "/admin/invitation-revoke",
   identity: "/identity",
   principal: "/admin/principal",
   publisher: "/admin/publisher",
@@ -69,6 +73,30 @@ const inventory = z
   })
   .strict();
 function safeResult(command: AdminCommand, value: unknown): unknown {
+  if (command === "invite")
+    return z
+      .object({
+        id: z.string().uuid(),
+        url: z
+          .string()
+          .url()
+          .refine((v) => /^https:\/\/[^/]+\/invite\/[a-f0-9]{64}$/.test(v)),
+        expiresAt: z.number().int().positive(),
+      })
+      .strict()
+      .parse(value);
+  if (command === "invite-status")
+    return z
+      .object({
+        id: z.string().uuid(),
+        email: z.string().refine((v) => emailAddress(v) !== undefined),
+        issuer: z.string().url(),
+        workspaces: z.array(slug).min(1).max(100),
+        expiresAt: z.number().int().positive(),
+        status: z.enum(["pending", "accepted", "revoked", "expired"]),
+      })
+      .strict()
+      .parse(value);
   if (command === "identity")
     return z
       .object({ issuer: z.string().url().max(256), key: identity })
