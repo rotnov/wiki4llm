@@ -451,6 +451,46 @@ test("metadata failure names the field and state without leaking its value", asy
   }
 });
 
+for (const absent of [null, undefined, {}]) {
+  test(`in-progress files with ${JSON.stringify(absent)} attributes wait for verified completion`, async () => {
+    const f = await setup();
+    try {
+      await f.submit();
+      await f.release();
+      const expected = f.files[0]!.attributes;
+      f.files[0]!.attributes = absent;
+      await f.tick();
+      const pending = await f.status();
+      assert.equal(pending.job.status, "pending");
+      assert.equal(pending.job.completed, 0);
+      assert.equal(pending.publication, null);
+      f.files[0]!.attributes = expected;
+      f.setState("completed");
+      await f.tick();
+      assert.equal((await f.status()).job.status, "complete");
+    } finally {
+      await f.mf.dispose();
+    }
+  });
+}
+
+test("completed files without metadata still fail closed", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    await f.release();
+    f.files[0]!.attributes = null;
+    f.setState("completed");
+    await f.tick();
+    const result = await f.status();
+    assert.equal(result.job.status, "failed");
+    assert.equal(result.job.error, "provider_metadata_absent_completed");
+    assert.equal(result.publication, null);
+  } finally {
+    await f.mf.dispose();
+  }
+});
+
 test("job timing is stable while pending and records completion duration", async () => {
   const f = await setup();
   try {

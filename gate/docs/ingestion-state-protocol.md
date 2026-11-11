@@ -357,7 +357,11 @@ back off to at most 15 minutes. Jobs expire after 24 hours instead of polling fo
 
 The alarm uses the existing project query credential only for fixed-origin GETs.
 Provider IDs, status, pagination and each owned file's original attributes are
-validated. No fabricated Access identity or extended CI JWT is used: the server
+validated. An `in_progress` file stays unready even if its attributes are absent
+or partial; every original attribute must match once the file is `completed`,
+before it contributes to publication. The provider permits nullable attributes
+in its [file response](https://developers.openai.com/api/reference/resources/vector_stores/subresources/files/methods/retrieve).
+No fabricated Access identity or extended CI JWT is used: the server
 executes a bounded delegation accepted from the submitting publisher. Before
 applying each result, it transactionally rechecks job identity, authority binding,
 epoch, revision, enablement and publisher grants. A new writer lease or subsequent

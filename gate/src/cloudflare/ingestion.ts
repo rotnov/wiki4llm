@@ -1099,6 +1099,9 @@ export class IngestionState {
         ) as Record<string, unknown>;
         if (expected.store !== job.store)
           throw new BackgroundFailure("provider_metadata_store");
+        // In-progress provider records may not expose final attributes yet.
+        // They cannot become ready until a later completed record passes every check.
+        if (f.status === "in_progress") continue;
         if (!f.attributes)
           throw new BackgroundFailure(`provider_metadata_absent_${f.status}`);
         const mismatch = Object.entries(attributes).find(
