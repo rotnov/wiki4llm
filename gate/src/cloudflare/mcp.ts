@@ -49,10 +49,7 @@ export async function mcp(
     return {
       tools: Object.entries(toolSchemas).map(([name, schema]) => ({
         name,
-        description:
-          name === "query"
-            ? "Search authorized workspaces. Modes control OpenAI embedding/text weights."
-            : toolDescriptions[name as keyof typeof toolSchemas],
+        description: toolDescriptions[name as keyof typeof toolSchemas],
         inputSchema: z.toJSONSchema(schema) as any,
         annotations: {
           readOnlyHint: true,

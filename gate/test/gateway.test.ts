@@ -277,3 +277,41 @@ test("multi_get pins one workspace snapshot across concurrent publication", asyn
     else assert.deepEqual(contentReads, ["g-old", "g-old"]);
   }
 });
+
+test("workspace listing accepts 50, preserves default 20 and paginates authorized names", () =>
+  fixture(async (s, g, t) => {
+    for (let i = 0; i < 55; i++)
+      s.setWorkspace(`team-${String(i).padStart(2, "0")}`);
+    s.setPrincipal("p", { allow: ["team-*"], deny: ["team-54"] });
+    const first: any = await g.execute(t, "list_workspaces", {});
+    assert.equal(first.workspaces.length, 20);
+    assert.equal(first.nextOffset, 20);
+    const large: any = await g.execute(t, "list_workspaces", { limit: 50 });
+    assert.equal(large.workspaces.length, 50);
+    assert.equal(large.nextOffset, 50);
+    const last: any = await g.execute(t, "list_workspaces", {
+      limit: 50,
+      offset: large.nextOffset,
+    });
+    assert.equal(last.workspaces.length, 4);
+    assert.equal(last.nextOffset, null);
+    assert.deepEqual(
+      [...large.workspaces, ...last.workspaces].map((w: any) => w.id),
+      Array.from(
+        { length: 54 },
+        (_, i) => `team-${String(i).padStart(2, "0")}`,
+      ),
+    );
+    for (const limit of [0, 51, 1.5])
+      await assert.rejects(g.execute(t, "list_workspaces", { limit }), {
+        code: "INVALID_INPUT",
+      });
+    await assert.rejects(
+      g.execute(t, "query", {
+        query: "test",
+        workspaces: ["team-00"],
+        limit: 21,
+      }),
+      { code: "INVALID_INPUT" },
+    );
+  }));

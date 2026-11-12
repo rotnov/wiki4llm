@@ -5,45 +5,113 @@ import { resolveSelection, validateSlug } from "./policy.js";
 import { GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
 const MAX_REFERENCE_LENGTH = 8192;
-const selectors = z.array(z.string().max(80)).max(20).optional();
+// Keep parameter guidance in both schemas and tool prose: some connectors flatten schemas.
+const parameterDescriptions = {
+  offset:
+    "offset: integer 0-100000, default 0. Use returned nextOffset for the next page; null means no more pages.",
+  workspaceLimit: "limit: integer 1-50, default 20 workspaces per page.",
+  query: "query: trimmed nonempty search text, 1-4096 characters.",
+  workspaces:
+    "workspaces: up to 20 selectors, each at most 80 characters; names or wildcard masks within authorized grants. When omitted, use all effective grants (at most 20 workspaces); empty selection is rejected.",
+  mode: "mode: lex, vec or hybrid, default hybrid. QMD lex is model-free; OpenAI modes control embedding/text weights.",
+  queryLimit: "limit: integer 1-20, default 10 results.",
+  ref: "ref: exact document reference returned by query, at most 8192 characters.",
+  fromLine: "fromLine: integer 1-1000000, default 1; one-based starting line.",
+  maxLines: "maxLines: integer 1-200, default 80 lines per document.",
+  refs: "refs: 1-20 exact document references returned by query, each at most 8192 characters.",
+};
+const selectors = z
+  .array(z.string().max(80))
+  .max(20)
+  .optional()
+  .describe(parameterDescriptions.workspaces);
 export const toolSchemas = {
   list_workspaces: z
     .object({
-      offset: z.number().int().min(0).max(100000).default(0),
-      limit: z.number().int().min(1).max(20).default(20),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .max(100000)
+        .default(0)
+        .describe(parameterDescriptions.offset),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .default(20)
+        .describe(parameterDescriptions.workspaceLimit),
     })
     .strict(),
   query: z
     .object({
-      query: z.string().trim().min(1).max(4096),
+      query: z
+        .string()
+        .trim()
+        .min(1)
+        .max(4096)
+        .describe(parameterDescriptions.query),
       workspaces: selectors,
-      mode: z.enum(["lex", "vec", "hybrid"]).default("hybrid"),
-      limit: z.number().int().min(1).max(20).default(10),
+      mode: z
+        .enum(["lex", "vec", "hybrid"])
+        .default("hybrid")
+        .describe(parameterDescriptions.mode),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(10)
+        .describe(parameterDescriptions.queryLimit),
     })
     .strict(),
   get: z
     .object({
-      ref: z.string().max(MAX_REFERENCE_LENGTH),
-      fromLine: z.number().int().min(1).max(1000000).default(1),
-      maxLines: z.number().int().min(1).max(200).default(80),
+      ref: z
+        .string()
+        .max(MAX_REFERENCE_LENGTH)
+        .describe(parameterDescriptions.ref),
+      fromLine: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000000)
+        .default(1)
+        .describe(parameterDescriptions.fromLine),
+      maxLines: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .default(80)
+        .describe(parameterDescriptions.maxLines),
     })
     .strict(),
   multi_get: z
     .object({
-      refs: z.array(z.string().max(MAX_REFERENCE_LENGTH)).min(1).max(20),
-      maxLines: z.number().int().min(1).max(200).default(80),
+      refs: z
+        .array(z.string().max(MAX_REFERENCE_LENGTH))
+        .min(1)
+        .max(20)
+        .describe(parameterDescriptions.refs),
+      maxLines: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .default(80)
+        .describe(parameterDescriptions.maxLines),
     })
     .strict(),
   status: z.object({ workspaces: selectors }).strict(),
 };
 export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
-  list_workspaces: "List workspaces this credential may read.",
-  query:
-    "Search authorized workspaces. QMD lex is model-free; OpenAI modes control embedding/text weights.",
-  get: "Read an exact document reference returned by query.",
-  multi_get: "Read up to 20 exact authorized document references.",
-  status:
-    "Get published document counts and available background indexing status for authorized workspaces.",
+  list_workspaces: `List workspaces this credential may read. ${parameterDescriptions.offset} ${parameterDescriptions.workspaceLimit}`,
+  query: `Search authorized workspaces. ${parameterDescriptions.query} ${parameterDescriptions.workspaces} ${parameterDescriptions.mode} ${parameterDescriptions.queryLimit}`,
+  get: `Read an exact document reference returned by query. ${parameterDescriptions.ref} ${parameterDescriptions.fromLine} ${parameterDescriptions.maxLines}`,
+  multi_get: `Read exact authorized document references from their first line. ${parameterDescriptions.refs} ${parameterDescriptions.maxLines}`,
+  status: `Get published document counts and available background indexing status for authorized workspaces. ${parameterDescriptions.workspaces}`,
 };
 export type ToolName = keyof typeof toolSchemas;
 function parse<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
