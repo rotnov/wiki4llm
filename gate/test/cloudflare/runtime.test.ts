@@ -311,7 +311,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         );
         try {
           await client.connect(transport);
-          assert.equal((await client.listTools()).tools.length, 5);
+          assert.equal((await client.listTools()).tools.length, 6);
           for (let i = 0; i < 3; i++)
             assert.equal(
               (await client.callTool({ name: "status", arguments: {} }))
@@ -872,6 +872,98 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           (await rpc("status", { workspaces: ["large"] })).isError,
           true,
         );
+      },
+    );
+    await t.test(
+      "published-path discovery uses hosted snapshots and zero provider requests",
+      async () => {
+        const count = requests.length;
+        const wire = await rpc("find_documents", {
+          workspace: "example",
+          query: " readme.MD ",
+        });
+        const found = toolPayload(wire);
+        assert.equal(wire.structuredContent, undefined);
+        assert.equal(wire.content.length, 1);
+        assert.equal(found.results.length, 2);
+        assert.equal(found.hasMore, false);
+        for (const d of found.results) {
+          assert.equal(d.path, "README.md");
+          assert.equal(d.source.lineBasis, "none");
+          assert.equal(d.body, undefined);
+          assert.equal(d.snippet, undefined);
+        }
+        assert.equal(requests.length, count);
+        for (const workspace of ["hidden", "missing"]) {
+          await principal("reader", ["example"]);
+          const denied = await rpc("find_documents", {
+            workspace,
+            query: "README",
+          });
+          assert.equal(denied.content[0].text, "ACCESS_DENIED");
+        }
+        await principal();
+        const ref = found.results[0].ref;
+        assert.equal(
+          toolPayload(await rpc("get", { ref })).text,
+          "line one\nline two",
+        );
+        assert.equal(
+          toolPayload(await rpc("multi_get", { refs: [ref] })).documents.length,
+          1,
+        );
+        const m = structuredClone(fixture);
+        const c = m.collections.guide,
+          template = c.files["README.md"];
+        c.files = Object.fromEntries(
+          Array.from({ length: 21 }, (_, i) => {
+            const path = `nested-${i}/README.md`;
+            return [path, { ...template, path, file_id: `file-extra-${i}` }];
+          }),
+        );
+        await publish("discovery", m);
+        const n = requests.length;
+        const capped = toolPayload(
+          await rpc("find_documents", {
+            workspace: "discovery",
+            query: "README.md",
+            limit: 20,
+          }),
+        );
+        assert.equal(capped.results.length, 20);
+        assert.equal(capped.hasMore, true);
+        const target = toolPayload(
+          await rpc("find_documents", {
+            workspace: "discovery",
+            query: "README.md",
+            repository: "example/second",
+          }),
+        );
+        assert.equal(target.results.length, 1);
+        assert.equal(target.hasMore, false);
+        assert.equal(target.results[0].source.repository, "example/second");
+        assert.deepEqual(
+          toolPayload(
+            await rpc("find_documents", {
+              workspace: "discovery",
+              query: "README.md",
+              repository: "unknown",
+            }),
+          ),
+          { results: [], hasMore: false },
+        );
+        await publish("discovery", {
+          ...m,
+          generation: 2,
+          publication_id: crypto.randomUUID(),
+        });
+        const stale = await rpc("get", { ref: target.results[0].ref });
+        assert.equal(stale.content[0].text, "NOT_FOUND");
+        await principal("reader", ["example"]);
+        const denied = await rpc("get", { ref: target.results[0].ref });
+        assert.equal(denied.content[0].text, "ACCESS_DENIED");
+        await principal();
+        assert.equal(requests.length, n);
       },
     );
   } finally {

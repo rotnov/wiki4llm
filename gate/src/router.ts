@@ -22,6 +22,18 @@ export class RoutedBackend implements Backend {
     this.native ??= this.openNative(this.dir);
     return this.native;
   }
+  async findDocuments(
+    w: Workspace,
+    query: string,
+    repository: string | undefined,
+    limit: number,
+    signal: AbortSignal,
+  ) {
+    if (this.closed) throw new GateError("NOT_FOUND");
+    if (w.backend !== "openai" || !this.cloud.findDocuments)
+      throw new GateError("UNSUPPORTED_OPERATION");
+    return this.cloud.findDocuments(w, query, repository, limit, signal);
+  }
   async search(
     w: Workspace,
     q: string,

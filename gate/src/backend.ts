@@ -13,17 +13,10 @@ export interface IndexingStatus {
   publication_id?: string;
 }
 export type ReadFormat = "parsed" | "original";
-export interface Document {
+export interface DocumentMetadata {
   collection: string;
   path: string;
   title: string;
-  body: string;
-  original?: {
-    mimeType: string;
-    byteLength: number;
-    sha256: string;
-    blob?: string;
-  };
   source?: {
     kind: "openai";
     repository: string;
@@ -37,10 +30,30 @@ export interface Document {
     origin?: SourceOrigin;
   };
 }
+export interface Document extends DocumentMetadata {
+  body: string;
+  original?: {
+    mimeType: string;
+    byteLength: number;
+    sha256: string;
+    blob?: string;
+  };
+}
+export interface DocumentDiscovery {
+  results: DocumentMetadata[];
+  hasMore: boolean;
+}
 export interface Hit extends Document {
   score: number;
 }
 export interface Backend {
+  findDocuments?(
+    workspace: Workspace,
+    query: string,
+    repository: string | undefined,
+    limit: number,
+    signal: AbortSignal,
+  ): Promise<DocumentDiscovery>;
   search(
     workspace: Workspace,
     query: string,

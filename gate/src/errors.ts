@@ -11,6 +11,7 @@ export class GateError extends Error {
       | "INCOMPLETE_CONTENT"
       | "CONTENT_TOO_LARGE"
       | "CONTENT_MISMATCH"
+      | "UNSUPPORTED_OPERATION"
       | "UNSUPPORTED_CONTENT"
       | "UNSUPPORTED_FORMAT"
       | "ORIGINAL_UNAVAILABLE",
@@ -86,9 +87,11 @@ export function publicError(error: unknown): string {
     INCOMPLETE_CONTENT:
       "Provider content is incomplete; continuation is unsupported. For parsed reads try format=original; otherwise use a matching local source.",
     CONTENT_TOO_LARGE:
-      "Content exceeds the provider 2 MiB or tool response budget (query 64 KiB; reads 4 MiB). Request fewer results/documents or explicit parsed line ranges; use a local source for larger files. Nothing was truncated.",
+      "Content exceeds the provider 2 MiB or tool response budget (query/find_documents 64 KiB; reads 4 MiB). Reduce the result limit or request fewer documents or explicit parsed line ranges; use a local source for larger files. Nothing was truncated.",
     CONTENT_MISMATCH:
       "Original bytes do not match the published source hash; no content returned. Ask the publisher to verify the active file.",
+    UNSUPPORTED_OPERATION:
+      "Published-path discovery is available only for OpenAI workspaces with metadata discovery support.",
     UNSUPPORTED_CONTENT:
       "Provider returned an unsupported parsed representation. Try format=original or a matching local source; no partial content was returned.",
     UNSUPPORTED_FORMAT:

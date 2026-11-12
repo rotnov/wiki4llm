@@ -76,7 +76,14 @@ test("official MCP client authenticates each request, scopes tools, and cannot r
     assert.equal(client.getServerVersion()?.name, "wiki-rag-gate");
     assert.deepEqual(
       (await client.listTools()).tools.map((t) => t.name),
-      ["list_workspaces", "query", "get", "multi_get", "status"],
+      [
+        "list_workspaces",
+        "query",
+        "find_documents",
+        "get",
+        "multi_get",
+        "status",
+      ],
     );
     assertParameterGuidance((await client.listTools()).tools);
     const result: any = await client.callTool({

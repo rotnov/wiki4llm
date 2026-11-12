@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { StateReader, Workspace } from "./state-contract.js";
-import type { Backend, Document, ReadFormat } from "./backend.js";
-import { resolveSelection, validateSlug } from "./policy.js";
+import type { Backend, DocumentMetadata, ReadFormat } from "./backend.js";
+import { resolveSelection, validateSlug, repositorySchema } from "./policy.js";
 import { GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
 const MAX_REFERENCE_LENGTH = 8192;
@@ -15,13 +15,13 @@ const parameterDescriptions = {
     "workspaces: up to 20 selectors, each at most 80 characters; names or wildcard masks within authorized grants. When omitted, use all effective grants (at most 20 workspaces); empty selection is rejected.",
   mode: "mode: lex, vec or hybrid, default hybrid. QMD lex is model-free; OpenAI modes control embedding/text weights.",
   queryLimit: "limit: integer 1-20, default 10 results.",
-  ref: "ref: exact document reference returned by query, at most 8192 characters.",
+  ref: "ref: exact document reference returned by query or find_documents, at most 8192 characters.",
   fromLine: "fromLine: integer 1-1000000, default 1; one-based starting line.",
   maxLines:
     "maxLines: optional integer 1-200; omitted returns all remaining parsed lines.",
   format:
     "format: parsed (default) returns complete available parsed text; original returns verified uploaded bytes. Ranges apply only to parsed.",
-  refs: "refs: 1-20 exact document references returned by query, each at most 8192 characters.",
+  refs: "refs: 1-20 exact document references returned by query or find_documents, each at most 8192 characters.",
 };
 const selectors = z
   .array(z.string().max(80))
@@ -67,6 +67,40 @@ export const toolSchemas = {
         .max(20)
         .default(10)
         .describe(parameterDescriptions.queryLimit),
+    })
+    .strict(),
+  find_documents: z
+    .object({
+      workspace: z
+        .string()
+        .min(1)
+        .max(80)
+        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+        .describe(
+          "workspace: one required exact authorized workspace slug; no masks or inferred default.",
+        ),
+      query: z
+        .string()
+        .trim()
+        .min(1)
+        .max(1024)
+        .describe(
+          "query: trimmed literal case-insensitive path fragment, 1-1024 characters; no glob, regex or token expansion.",
+        ),
+      repository: repositorySchema
+        .optional()
+        .describe(
+          "repository: optional exact case-sensitive repository identity, 1-256 characters; filtered before ranking/limit, no normalization or masks.",
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(5)
+        .describe(
+          "limit: integer 1-20, default 5 results; hasMore reports omitted matches, with no pagination.",
+        ),
     })
     .strict(),
   get: z
@@ -122,9 +156,11 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
     "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
   query:
     "Discover authorized documents. OpenAI: one full first-ranked excerpt each. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer local repository + relative path with your own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
-  get: "Read query ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
+  find_documents:
+    "Find published paths in one exact authorized OpenAI workspace by literal case-insensitive fragment. Optional exact case-sensitive repository filter precedes ranking; limit 1-20 (default 5). No bodies/provider calls. hasMore signals omitted matches; narrow query/repository or raise limit, no pagination. Use refs with get/multi_get; paths do not prove authority. QMD unsupported.",
+  get: "Read query/find_documents ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
   multi_get:
-    "Read 1-20 authorized query refs. format parsed (default): full text from first line; optional maxLines 1-200. original: verified bytes (binary MCP resources), no ranges. Prefer accessible local repository + relative path with your own tools; report revision differences. Use get/multi_get if local source/tools unavailable. source.sha256 hashes original bytes, not excerpts.",
+    "Read 1-20 authorized query/find_documents refs. format parsed (default): full text from first line; optional maxLines 1-200. original: verified bytes (binary MCP resources), no ranges. Prefer accessible local repository + relative path with your own tools; report revision differences. Use remote reads if local tools unavailable. source.sha256 hashes original bytes, not excerpts.",
   status:
     "Get document counts and background indexing status. workspaces: authorized names or masks; omitted means all authorized workspaces, at most 20; empty selection rejected.",
 };
@@ -231,7 +267,7 @@ export class Gateway {
         throw new GateError("NOT_FOUND", "Document unavailable");
       return w;
     };
-    const describe = (w: Workspace, d: Document) => ({
+    const describe = (w: Workspace, d: DocumentMetadata) => ({
       ref: encodeReference(w.id, w.generation!, d.collection, d.path),
       workspace: w.id,
       generation: w.generation,
@@ -375,6 +411,25 @@ export class Gateway {
                   },
                 }
               : {}),
+          };
+          break;
+        }
+        case "find_documents": {
+          const a = parse(toolSchemas.find_documents, args),
+            w = authorize([a.workspace])[0]!;
+          if (!w.generation) throw new GateError("NOT_FOUND");
+          if (!this.backend.findDocuments)
+            throw new GateError("UNSUPPORTED_OPERATION");
+          const found = await this.backend.findDocuments(
+            w,
+            a.query,
+            a.repository,
+            a.limit,
+            signal,
+          );
+          result = {
+            results: found.results.map((d) => describe(w, d)),
+            hasMore: found.hasMore,
           };
           break;
         }

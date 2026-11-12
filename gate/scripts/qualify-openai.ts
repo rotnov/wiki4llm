@@ -186,7 +186,7 @@ async function main() {
   try {
     stage = "initial-mcp";
     await start();
-    assert.equal((await client!.listTools()).tools.length, 5);
+    assert.equal((await client!.listTools()).tools.length, 6);
     checks.push("mcp-initialize-tools");
     const first = await queryReady();
     const refs = first.results.map((r: any) => r.ref) as string[];

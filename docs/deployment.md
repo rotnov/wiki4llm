@@ -155,8 +155,8 @@ commit can change publication metadata even if all selected file IDs are reused.
 requires an already initialized authority.
 
 Connect your MCP client to `https://gate.example.com/mcp` and complete Access OAuth.
-The authenticated identity must also have a gate reader mapping. Verify the five
-tools (`list_workspaces`, `query`, `get`, `multi_get`, `status`), query a known phrase,
+The authenticated identity must also have a gate reader mapping. Verify the six
+tools (`list_workspaces`, `query`, `find_documents`, `get`, `multi_get`, `status`), query a known phrase,
 and use `get` on its returned reference. Check repository/path provenance and deny
 access to a workspace outside that reader's grants. Login alone is not retrieval
 acceptance. Human reader OAuth does not grant ingestion or administration.

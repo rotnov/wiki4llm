@@ -35,8 +35,8 @@ come from that installation; do not reuse another operator's callback or plugin 
    An existing Access session may skip the email-code entry; that is still OAuth.
 7. Verify the plugin under **Manage / Settings → Plugins**: an account must appear
    under **Connected accounts**. Use **Refresh tools**, then inspect the plugin's
-   app/tool details. Expect five read-only tools: `list_workspaces`, `status`,
-   `query`, `get`, `multi_get`. Preserve existing tool approval settings.
+   app/tool details. Expect six read-only tools: `list_workspaces`, `status`,
+   `query`, `find_documents`, `get`, `multi_get`. Preserve existing tool approval settings.
 
 If creation reports rejected settings before login, check discovery and the exact
 callback allowlist. If a network error appears after creation, inspect installed

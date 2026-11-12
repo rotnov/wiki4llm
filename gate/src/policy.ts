@@ -1,4 +1,16 @@
+import { z } from "zod";
 import { denied, invalid } from "./errors.js";
+export const repositorySchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[^\x00-\x1f\x7f]+$/)
+  .refine(
+    (v) =>
+      !v.startsWith("/") &&
+      !v.includes("\\") &&
+      !v.split("/").some((p) => !p || p === "." || p === ".."),
+  );
 export interface Grants {
   allow: string[];
   deny: string[];

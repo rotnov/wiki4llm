@@ -154,7 +154,7 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
         requestInit: { headers: { Authorization: "Bearer " + token.secret } },
       }),
     );
-    assert.equal((await client.listTools()).tools.length, 5);
+    assert.equal((await client.listTools()).tools.length, 6);
     const call = async (name: string, args: any = {}) =>
       (await client.callTool({ name, arguments: args })) as any;
     const first = await call("query", {

@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import type {
   Backend,
   Document,
+  DocumentMetadata,
+  DocumentDiscovery,
   Hit,
   SearchMode,
   IndexingStatus,
@@ -200,19 +202,17 @@ export class OpenAIBackend implements Backend {
       abort.abort();
     }
   }
-  private document(
+  private metadata(
     s: OpenAISnapshot,
     name: string,
     path: string,
-    body: string,
-  ): Document {
+  ): DocumentMetadata {
     const c = s.manifest.collections[name]!,
       f = c.files[path]!;
     return {
       collection: name,
       path,
       title: path.split("/").at(-1)!,
-      body,
       source: {
         kind: "openai",
         repository: c.repository,
@@ -222,9 +222,71 @@ export class OpenAIBackend implements Backend {
         publicationId: s.manifest.publication_id,
         sha256: f.sha256,
         fileKind: f.kind,
-        lineBasis: "parsed-text",
+        lineBasis: "none",
         ...(f.origin ? { origin: f.origin } : {}),
       },
+    };
+  }
+  private document(
+    s: OpenAISnapshot,
+    name: string,
+    path: string,
+    body: string,
+  ): Document {
+    const metadata = this.metadata(s, name, path);
+    return {
+      ...metadata,
+      body,
+      source: { ...metadata.source!, lineBasis: "parsed-text" },
+    };
+  }
+  async findDocuments(
+    w: Workspace,
+    query: string,
+    repository: string | undefined,
+    limit: number,
+    signal: AbortSignal,
+  ): Promise<DocumentDiscovery> {
+    if (signal.aborted) throw new GateError("CANCELLED");
+    const snapshot = this.snapshot(w),
+      needle = query.toLowerCase();
+    const matches: {
+      repository: string;
+      collection: string;
+      path: string;
+      rank: number;
+    }[] = [];
+    for (const [collection, c] of Object.entries(
+      snapshot.manifest.collections,
+    )) {
+      if (repository !== undefined && c.repository !== repository) continue;
+      for (const path of Object.keys(c.files)) {
+        if (!path.toLowerCase().includes(needle)) continue;
+        const basename = path.split("/").at(-1)!.toLowerCase();
+        matches.push({
+          repository: c.repository,
+          collection,
+          path,
+          rank: basename === needle ? 0 : basename.includes(needle) ? 1 : 2,
+        });
+      }
+    }
+    const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    matches.sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        compare(a.repository, b.repository) ||
+        compare(a.collection, b.collection) ||
+        compare(a.path, b.path),
+    );
+    if (signal.aborted) throw new GateError("CANCELLED");
+    return {
+      results: matches
+        .slice(0, limit)
+        .map(({ collection, path }) =>
+          this.metadata(snapshot, collection, path),
+        ),
+      hasMore: matches.length > limit,
     };
   }
   async search(

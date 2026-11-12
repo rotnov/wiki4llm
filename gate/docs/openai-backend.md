@@ -62,6 +62,55 @@ only after another explicit import. This describes the native import path. The [
 supports atomic remote publication and Access OAuth; the repository-root
 [GitHub workflow](../../docs/github-actions.md) provides ingestion automation.
 
+## Published-path discovery
+
+Use `find_documents({workspace, query, repository?, limit?})` for a known filename
+or literal path fragment in one explicitly authorized OpenAI workspace. Prefer
+local filename discovery and source reads when a suitable checkout is accessible.
+`query` is trimmed and must contain 1-1024 characters; it matches the entire
+remaining string using `toLowerCase().includes()`, without Unicode normalization,
+tokenization, regex or glob interpretation. Hyphens and underscores differ.
+
+Optional `repository` uses the manifest repository identity rules: 1-256 characters,
+no controls, leading slash, backslash, empty slash segments, `.` or `..` segments.
+It is compared exactly and case-sensitively, without trimming or normalization,
+before matching, ranking and limiting. Unknown repositories return zero results
+without suggestions. `workspace` is a single exact slug, with no default or masks.
+An unknown or ungranted workspace returns `ACCESS_DENIED`; an authorized unavailable
+publication returns `NOT_FOUND`. QMD or an absent backend capability returns the
+fixed `UNSUPPORTED_OPERATION` error without initializing native search.
+
+The active validated manifest supplies all candidates, without document-body reads,
+provider requests, models or a separate index. Order is exact basename, basename
+containing the fragment, then remaining path matches. Ties use original repository,
+collection and path in code-unit order. Distinct paths or repositories remain
+separate; filename matches do not establish canonical ownership or approval.
+
+`limit` is an integer 1-20, default 5; invalid values are rejected. Results contain
+`ref`, `workspace`, `generation`, `collection`, full `path`, basename `title` and
+canonical `source` provenance, including nullable commits and optional `origin`.
+Only the display title is capped at 500 UTF-16 code units; ranking, paths and refs
+retain the full basename. `source.lineBasis` is `none`. No snippet, body, score or
+provider/store IDs are exposed.
+
+The response is `{results, hasMore}`. `hasMore` is true exactly when matches were
+omitted by the limit; there is no total count, cursor or pagination. Narrow the
+fragment, supply a known exact repository or increase the limit to 20. Repeated
+calls on one generation return the same prefix. The repository filter prevents
+other repositories from consuming the result cap, but does not guarantee exhaustive
+reachability within a repository. `hasMore=false` covers matching published paths
+only, not repository or corpus completeness. Zero matches is a successful empty
+result with `hasMore=false`, without content-search fallback or hidden suggestions.
+
+The existing 65,536-byte UTF-8 JSON payload budget also applies to discovery; this
+is not a complete MCP-envelope bound. Overflow returns `CONTENT_TOO_LARGE`; reduce
+the limit. Responses use the existing single JSON text block. `get` and `multi_get`
+accept discovery refs and reauthorize them: revoked access fails and an older
+generation returns `NOT_FOUND`, even if the path remains. Grant or generation
+changes during discovery suppress both results and operation errors; publication
+changes return `CONFLICT`. Discovery grants no local filesystem authority and does
+not guarantee that a later provider original-byte download will be permitted.
+
 ## Validation and retrieval limits
 
 Imports accept at most 8 MiB, 20 collections and 10,000 files per workspace. Collection

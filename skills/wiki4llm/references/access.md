@@ -124,9 +124,9 @@ the callback against the Access allowlist. If it later shows a network error,
 inspect installed plugins before retrying: creation may have succeeded while the
 next connection step failed. Resume **Connect** on the existing plugin.
 
-Cloud acceptance progresses through saved configuration, OAuth, five discovered
+Cloud acceptance progresses through saved configuration, OAuth, six discovered
 tools, and actual authorized retrieval. Keep each result separate. The tools are
-`list_workspaces`, `status`, `query`, `get`, `multi_get`; there are no MCP admin tools.
+`list_workspaces`, `status`, `query`, `find_documents`, `get`, `multi_get`; there are no MCP admin tools.
 If a cloud environment is Unpublished, report the missing runtime test and obtain
 the intended environment before publishing or launching a new cloud chat.
 
