@@ -26,28 +26,28 @@ The reusable workflow's own default remains `sync` for callers that omit `mode`.
 All nonsecret configuration can be supplied in the caller job's `with:` block;
 no TOML file or configuration checkout is needed in that mode.
 
-| Input                   | Default              | Meaning                                                                   |
-| ----------------------- | -------------------- | ------------------------------------------------------------------------- |
-| `workspace`             | Empty                | Workspace slug; selects direct configuration with the next two inputs     |
-| `project-id`            | Empty                | OpenAI project identifier                                                 |
-| `collections`           | Empty                | JSON array of collection objects                                          |
-| `max-files`             | 10000                | Maximum selected files, across all collections                            |
-| `max-file-bytes`        | 2000000              | Maximum size of one selected file                                         |
-| `max-total-bytes`       | 50000000             | Maximum total selected bytes                                              |
-| `unlimited-files`       | `false`              | Disable only the direct-input file-count selection budget                 |
-| `unlimited-file-bytes`  | `false`              | Disable only the direct-input per-file byte selection budget              |
-| `unlimited-total-bytes` | `false`              | Disable only the direct-input total-byte selection budget                 |
-| `chunk-size`            | 800                  | Chunk size in tokens                                                      |
-| `chunk-overlap`         | 400                  | Overlap in tokens, at most half the chunk size                            |
-| `gate-origin`           | Required             | Exact HTTPS origin without a path or trailing slash                       |
-| `mode`                  | `sync`               | `sync` submits incremental indexing; `plan` reads without provider writes |
-| `lease-wait-seconds`    | 300                  | Lease wait, integer from 0 to 1800                                        |
-| `environment`           | `wiki-rag-publisher` | GitHub deployment environment                                             |
-| `tool-repository`       | `rotnov/wiki4llm`    | Tool repository                                                           |
-| `tool-ref`              | `main`               | Follow upstream, or supply a full commit SHA                              |
-| `config`                | Empty                | Optional committed TOML path, instead of direct configuration             |
-| `config-repository`     | Caller               | Optional separate repository for TOML configuration                       |
-| `config-ref`            | Triggering SHA       | Required when using another config repository                             |
+| Input                   | Default              | Meaning                                                                                  |
+| ----------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `workspace`             | Empty                | Workspace slug; selects direct configuration with the next two inputs                    |
+| `project-id`            | Empty                | OpenAI project identifier                                                                |
+| `collections`           | Empty                | JSON array of collection objects                                                         |
+| `max-files`             | 10000                | Maximum selected files, across all collections                                           |
+| `max-file-bytes`        | 2000000              | Maximum size of one selected file                                                        |
+| `max-total-bytes`       | 50000000             | Maximum total selected bytes                                                             |
+| `unlimited-files`       | `false`              | Disable only the direct-input file-count selection budget                                |
+| `unlimited-file-bytes`  | `false`              | Disable only the direct-input per-file byte selection budget                             |
+| `unlimited-total-bytes` | `false`              | Disable only the direct-input total-byte selection budget                                |
+| `chunk-size`            | 800                  | Chunk size in tokens                                                                     |
+| `chunk-overlap`         | 400                  | Overlap in tokens, at most half the chunk size                                           |
+| `gate-origin`           | Required             | Exact HTTPS origin without a path or trailing slash                                      |
+| `mode`                  | `sync`               | `sync` submits incremental indexing; `plan` previews; `diagnose` reads provider failures |
+| `lease-wait-seconds`    | 300                  | Lease wait, integer from 0 to 1800                                                       |
+| `environment`           | `wiki-rag-publisher` | GitHub deployment environment                                                            |
+| `tool-repository`       | `rotnov/wiki4llm`    | Tool repository                                                                          |
+| `tool-ref`              | `main`               | Follow upstream, or supply a full commit SHA                                             |
+| `config`                | Empty                | Optional committed TOML path, instead of direct configuration                            |
+| `config-repository`     | Caller               | Optional separate repository for TOML configuration                                      |
+| `config-ref`            | Triggering SHA       | Required when using another config repository                                            |
 
 Each collection has `name`, `repository`, `branch`, `vector_store_id` and `include`,
 plus optional `exclude` and `extensions`. Omit `extensions` to select supported
@@ -102,12 +102,12 @@ proof that the provider will accept or finish a later upload.
 
 ## Secrets passed by the caller
 
-| Secret           | Requirement                             | Destination                                              |
-| ---------------- | --------------------------------------- | -------------------------------------------------------- |
-| `gate-client-id` | Required                                | Cloudflare Access service-token client ID                |
-| `gate-token`     | Required                                | Matching Access client secret, with publisher permission |
-| `openai-key`     | Required for `sync`; omitted for `plan` | Project-scoped OpenAI ingestion                          |
-| `github-token`   | Optional                                | Checkout of tool, configuration and source repositories  |
+| Secret           | Requirement                                            | Destination                                              |
+| ---------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| `gate-client-id` | Required                                               | Cloudflare Access service-token client ID                |
+| `gate-token`     | Required                                               | Matching Access client secret, with publisher permission |
+| `openai-key`     | Required for `sync` and `diagnose`; omitted for `plan` | Project-scoped OpenAI ingestion                          |
+| `github-token`   | Optional                                               | Checkout of tool, configuration and source repositories  |
 
 The gate token is the Access service-token secret, not an OpenAI key or a generic
 Bearer token. Its identity needs an enabled publisher grant for the configured workspace.
@@ -159,12 +159,46 @@ chosen under the remote lease. `plan` acquires no lease and makes no provider
 requests, although source checkout and gate publication reads require networking.
 Cleanup/release failures remain fatal, including after a committed publication.
 
+`diagnose` is an explicitly selected, GET-only provider failure scan. It validates
+committed configuration, lists each configured vector store once through bounded
+pagination, and reports every observed `failed` or `cancelled` attachment. It does
+not clone source repositories, construct a gate client, acquire a lease, upload,
+reattach, delete, checkpoint or submit a job. The existing project key is required;
+gate credentials remain required workflow inputs but are not used for requests.
+No Worker deployment is needed for this mode. A scan is a point-in-time observation,
+not an atomic provider snapshot or a publication result.
+
+Use it only in an authorized private operational workflow: the JSON log receipt
+contains immutable File IDs for later journal correlation and sanitized actual
+`last_error.message` text. `provider_diagnostics` contains `scanned_files` and
+`failures`; each failure has collection, File ID, status, usage bytes, metadata
+state (absent/empty/present), and last-error code/message. Unknown codes are labeled
+`unknown`; absent/non-string messages are null. Known credentials, attribute values,
+resource IDs inside prose, URLs, emails and quoted content are redacted before the
+message is capped at 1000 characters. Redaction is best effort, so do not republish
+these logs or treat them as public-safe corpus output. Source bodies and raw
+attributes are never included. A generic provider message remains generic; it does
+not establish the provider's internal root cause.
+
+The scan permits 100 items per page, 1000 pages per store, 2 MB per decoded HTTP
+response, and 10,000 failure records across the workspace. Invalid records,
+repeated IDs, broken pagination or exceeded bounds fail without emitting a partial
+receipt. Provider GET retries retain their existing finite policy. The result has
+mode `diagnosed`, empty job/publication outputs and skips the publication observer.
+Existing callers must explicitly add `diagnose` to their manual mode choices.
+Save the private receipt in ignored operator evidence, then correlate every File ID
+with the durable journal using authorized SELECT-only access before recovery.
+Store presence and provider metadata alone are not ownership proof. Do not acquire
+a writer lease or mutate journal rows just to diagnose; leave unresolved or unowned
+records explicitly unresolved. Keep failed attachments intact until their actual
+provider message and source/journal correlation have been preserved.
+
 Workflow outputs:
 
 - `workspace`: selected workspace slug.
-- `publication-id`: confirmed publication UUID after waiting or for an applied no-op; empty for plan.
+- `publication-id`: confirmed publication UUID after waiting or for an applied no-op; empty for plan and diagnose.
 - `job-id`: durable background job UUID for a submitted sync; otherwise empty.
-- `mode`: `preview` or `applied` on workflow success. The submission step itself returns `submitted`.
+- `mode`: `preview`, `applied` or `diagnosed` on workflow success. The submission step itself returns `submitted`.
 
 The sync step returns after bounded concurrent uploads, attachment batches and
 durable gate submission. A separate step polls gate status every ten seconds for

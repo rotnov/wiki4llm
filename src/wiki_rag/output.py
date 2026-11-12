@@ -10,6 +10,9 @@ def summarize(result):
         for name in ("mode", "workspace", "publication_id", "job_id", "network_requests")
         if name in result
     }
+    if result.get("mode") == "diagnosed":
+        # Constructed by the bounded GET-only adapter, not raw provider JSON.
+        summary["provider_diagnostics"] = result["provider_diagnostics"]
     if "job" in result:
         summary["job"] = {
             k: v

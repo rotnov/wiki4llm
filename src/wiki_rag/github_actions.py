@@ -329,8 +329,8 @@ def execute(
     remote_factory=RemoteState,
     provider_factory=OpenAIProvider,
 ):
-    if mode not in {"sync", "plan", "wait"}:
-        raise RagError("mode must be sync, plan or wait")
+    if mode not in {"sync", "plan", "wait", "diagnose"}:
+        raise RagError("mode must be sync, plan, wait or diagnose")
     if type(lease_wait_seconds) is not int or not 0 <= lease_wait_seconds <= 1800:
         raise RagError("lease wait must be an integer from 0 to 1800")
     workspace = lexical_path(workspace)
@@ -380,8 +380,33 @@ def execute(
                 "publication_id": job["publication_id"],
                 "job": job,
             }
-    secret("WIKI_RAG_INGEST_KEY", required=mode == "sync")
+    secret("WIKI_RAG_INGEST_KEY", required=mode in {"sync", "diagnose"})
     token = secret("WIKI_RAG_CHECKOUT_TOKEN", required=False)
+    if mode == "diagnose":
+        # No gate client, lease, source preparation or ingestion-engine call.
+        with git_environment():
+            if path is not None:
+                committed_config(path, content)
+                if path.read_bytes() != content:
+                    raise RagError("workflow config changed during preparation")
+            for c in cfg.collections:
+                git("check-ref-format", "--branch", c.branch)
+        sensitive = [os.environ.get(name, "") for name in INPUT_ENV]
+        diagnostics = {"scanned_files": 0, "failures": []}
+        with provider_factory(cfg) as provider:
+            for c in cfg.collections:
+                receipt = provider.attachment_failures(c.vector_store_id, sensitive=sensitive)
+                diagnostics["scanned_files"] += receipt["scanned_files"]
+                diagnostics["failures"].extend(
+                    dict(failure, collection=c.name) for failure in receipt["failures"]
+                )
+                if len(diagnostics["failures"]) > 10000:
+                    raise RagError("provider diagnosis failure receipt limit reached")
+        return {
+            "mode": "diagnosed",
+            "workspace": cfg.remote_state.workspace,
+            "provider_diagnostics": diagnostics,
+        }
     remote = provider = result = None
     try:
         remote = remote_factory(cfg)  # Capture only headers; constructor makes no requests.
@@ -434,7 +459,7 @@ def main(argv=None):
     config_args = parser.add_mutually_exclusive_group()
     config_args.add_argument("--config")
     config_args.add_argument("--workflow-inputs", action="store_true")
-    parser.add_argument("--mode", default="sync", choices=("sync", "plan", "wait"))
+    parser.add_argument("--mode", default="sync", choices=("sync", "plan", "wait", "diagnose"))
     parser.add_argument("--job-id")
     parser.add_argument("--lease-wait-seconds", type=int, default=300)
     args = parser.parse_args(argv)
@@ -462,7 +487,7 @@ def main(argv=None):
         if job and not re.fullmatch(r"[0-9a-f-]{36}", job):
             raise RagError("invalid job output")
         mode = result["mode"]
-        if mode not in {"preview", "submitted", "applied"}:
+        if mode not in {"preview", "submitted", "applied", "diagnosed"}:
             raise RagError("invalid mode output")
         if os.environ.get("GITHUB_OUTPUT"):
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:

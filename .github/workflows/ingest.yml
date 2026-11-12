@@ -55,7 +55,7 @@ on:
       mode:
         type: string
         default: sync
-        description: sync publishes incrementally; plan makes no provider writes
+        description: sync publishes; plan previews; diagnose reads provider failures only
       lease-wait-seconds:
         type: number
         default: 300
@@ -85,7 +85,7 @@ on:
         description: Cloudflare Access service-token secret for the publisher
       openai-key:
         required: false
-        description: Required for sync; unused for plan
+        description: Required for sync and diagnose; unused for plan
       github-token:
         required: false
         description: Optional contents-read token for other private repositories
@@ -152,7 +152,7 @@ jobs:
               value = inputs.get(name, False)
               require(type(value) is bool, name + " must be a boolean")
               require(direct or not value, name + " requires direct inputs; set limits in TOML for config mode")
-          require(os.environ["MODE"] in {"plan", "sync"}, "mode must be plan or sync")
+          require(os.environ["MODE"] in {"plan", "sync", "diagnose"}, "mode must be plan, sync or diagnose")
           path = pathlib.PurePosixPath(os.environ["CONFIG_PATH"])
           require(not path.is_absolute() and ".." not in path.parts and "\\" not in str(path), "config must stay inside its repository")
           external = os.environ["CONFIG_REPOSITORY"] not in {"", os.environ["CALLER_REPOSITORY"]}

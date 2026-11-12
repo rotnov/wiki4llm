@@ -9,7 +9,13 @@ import time
 import httpx
 
 from .config import RagError
-from .provider_diagnostics import attribute_values, error_details, route_shape
+from .provider_diagnostics import (
+    CODES,
+    attribute_values,
+    error_details,
+    route_shape,
+    sanitized_message,
+)
 from .selection import digest
 
 
@@ -165,6 +171,90 @@ class OpenAIProvider:
         if not isinstance(data.get("data"), list):
             raise RagError("invalid provider file list")
         return not data["data"] and data.get("has_more") is False
+
+    def attachment_failures(self, store, *, sensitive=()):
+        """GET-only terminal failure receipt; store presence is not ownership proof."""
+        store = identifier(store, "vs_")
+        failures, seen, after, scanned = [], set(), None, 0
+        for _ in range(1000):
+            params = {"limit": 100, "order": "asc"}
+            if after:
+                params["after"] = after
+            response = self.request("GET", f"vector_stores/{store}/files", params=params)
+            if len(response.content) > 2_000_000:
+                raise RagError("provider diagnosis page exceeds size limit")
+            try:
+                page = response.json()
+            except ValueError:
+                raise RagError("invalid provider diagnosis JSON") from None
+            if (
+                not isinstance(page, dict)
+                or not isinstance(page.get("data"), list)
+                or len(page["data"]) > 100
+                or type(page.get("has_more")) is not bool
+            ):
+                raise RagError("invalid provider diagnosis page")
+            last = None
+            for item in page["data"]:
+                if not isinstance(item, dict):
+                    raise RagError("invalid provider diagnosis record")
+                fid = identifier(item.get("id"), "file-")
+                status = item.get("status")
+                if (
+                    len(fid) > 200
+                    or fid in seen
+                    or status not in ("in_progress", "completed", "failed", "cancelled")
+                ):
+                    raise RagError("invalid or repeated provider diagnosis record")
+                seen.add(fid)
+                last = fid
+                scanned += 1
+                if status not in ("failed", "cancelled"):
+                    continue
+                attrs, usage = item.get("attributes"), item.get("usage_bytes")
+                error = item.get("last_error") or {}
+                if (
+                    (attrs is not None and not isinstance(attrs, dict))
+                    or type(usage) is not int
+                    or usage < 0
+                    or not isinstance(error, dict)
+                ):
+                    raise RagError("invalid provider diagnosis failure")
+                code = error.get("code")
+                failures.append(
+                    {
+                        "file_id": fid,
+                        "status": status,
+                        "metadata_state": "absent"
+                        if attrs is None
+                        else "present"
+                        if attrs
+                        else "empty",
+                        "usage_bytes": usage,
+                        "last_error": {
+                            "code": code
+                            if isinstance(code, str)
+                            and code in CODES | {"invalid_file", "unsupported_file"}
+                            else "unknown",
+                            "message": sanitized_message(
+                                error.get("message"),
+                                [
+                                    *self._diagnostic_secrets,
+                                    *sensitive,
+                                    *attribute_values({"attributes": attrs}),
+                                ],
+                            ),
+                        },
+                    }
+                )
+                if len(failures) > 10000:
+                    raise RagError("provider diagnosis failure receipt limit reached")
+            if not page["has_more"]:
+                return {"scanned_files": scanned, "failures": failures}
+            if last is None or page.get("last_id") != last:
+                raise RagError("invalid provider diagnosis pagination")
+            after = last
+        raise RagError("provider diagnosis pagination limit reached")
 
     def upload(self, filename, content):
         data = self.json(
