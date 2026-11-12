@@ -10,7 +10,7 @@ import type {
 } from "./backend.js";
 import type { Workspace } from "./state-contract.js";
 import type { OpenAISnapshot } from "./manifest.js";
-import { GateError } from "./errors.js";
+import { GateError, OriginalDownloadError } from "./errors.js";
 const MAX_RESPONSE = 2 * 1024 * 1024;
 const textParts = z
   .array(z.object({ type: z.literal("text"), text: z.string() }))
@@ -20,6 +20,43 @@ const page = z.object({
   has_more: z.boolean(),
   next_page: z.string().max(256).nullable().optional(),
 });
+// The enclosing request deadline also bounds diagnostic reads. Never log the body.
+async function originalFailure(
+  response: Response,
+): Promise<OriginalDownloadError> {
+  let body: unknown;
+  const reader = response.body?.getReader();
+  if (reader) {
+    try {
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 8192) break;
+        chunks.push(value);
+      }
+      if (size <= 8192)
+        body = JSON.parse(
+          new TextDecoder("utf-8", { fatal: true }).decode(
+            Buffer.concat(chunks),
+          ),
+        );
+    } catch {
+      // Malformed, oversized or unavailable diagnostics never replace the failure.
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  return new OriginalDownloadError(
+    response.status,
+    response.headers.get("x-request-id"),
+    body,
+  );
+}
+
 export interface OpenAIOptions {
   // Programmatic test seam only; never exposed by CLI, persisted config or MCP.
   transport?: (url: string, init: RequestInit) => Promise<Response>;
@@ -104,11 +141,9 @@ export class OpenAIBackend implements Backend {
             },
           );
           if (!response.ok || response.redirected) {
+            if (original) throw await originalFailure(response);
             await response.body?.cancel();
-            throw new GateError(
-              original ? "ORIGINAL_UNAVAILABLE" : "NOT_FOUND",
-              "OpenAI request failed",
-            );
+            throw new GateError("NOT_FOUND", "OpenAI request failed");
           }
           if (
             response.status !== 200 ||

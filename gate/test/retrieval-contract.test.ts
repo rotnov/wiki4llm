@@ -10,6 +10,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { State } from "../src/state.js";
 import { Gateway, encodeReference } from "../src/gateway.js";
 import { OpenAIBackend } from "../src/openai.js";
+import { publicError } from "../src/errors.js";
 import { startServer } from "../src/http.js";
 import { mcp } from "../src/cloudflare/mcp.js";
 const text =
@@ -469,4 +470,137 @@ test("partial HTTP signals reject parsed and search JSON even with has_more fals
       assert.ok(!wire.includes("partial hit"));
       assert.equal(result.structuredContent, undefined);
     }
+});
+
+test("original failures preserve only bounded allowlisted provider diagnostics", async (t) => {
+  const requestId = "req_0123456789abcdef0123456789abcdef";
+  for (const sample of [
+    {
+      status: 400,
+      error: {
+        type: "invalid_request_error",
+        code: null,
+        message: "Not allowed to download files of purpose: assistants",
+      },
+      expected: {
+        status: 400,
+        requestId,
+        type: "invalid_request_error",
+        classification: "purpose_not_downloadable",
+      },
+    },
+    {
+      status: 403,
+      error: {
+        type: "invalid_request_error",
+        code: "permission_denied",
+        message: "private provider body sk-proj-synthetic",
+      },
+      expected: {
+        status: 403,
+        requestId,
+        type: "invalid_request_error",
+        code: "permission_denied",
+      },
+    },
+    {
+      status: 404,
+      error: {
+        type: "invalid_request_error",
+        code: "not_found",
+        message: "file-secret missing",
+      },
+      expected: {
+        status: 404,
+        requestId,
+        type: "invalid_request_error",
+        code: "not_found",
+      },
+    },
+    {
+      status: 429,
+      error: {
+        type: "rate_limit_error",
+        code: "rate_limit_exceeded",
+        message: "private quota",
+      },
+      expected: {
+        status: 429,
+        requestId,
+        type: "rate_limit_error",
+        code: "rate_limit_exceeded",
+      },
+    },
+    {
+      status: 400,
+      error: {
+        type: "private-provider-type",
+        code: "private-provider-code",
+        message:
+          "Not allowed to download files of purpose: assistants private suffix",
+        param: "private-path",
+      },
+      expected: { status: 400, requestId },
+    },
+  ]) {
+    const f = setup(t, async () =>
+      Response.json(
+        { error: sample.error },
+        { status: sample.status, headers: { "x-request-id": requestId } },
+      ),
+    );
+    const error: any = await f.gateway
+      .execute(f.token.id, "get", { ref: f.ref, format: "original" })
+      .then(
+        () => assert.fail("must reject"),
+        (e) => e,
+      );
+    assert.equal(error.code, "ORIGINAL_UNAVAILABLE");
+    assert.deepEqual(error.diagnostics, sample.expected);
+    const wire = publicError(error);
+    assert.ok(wire.includes(JSON.stringify(sample.expected)));
+    for (const forbidden of [
+      "private provider",
+      "sk-proj-synthetic",
+      "file-secret",
+      "private-provider",
+      "private-path",
+      "private suffix",
+      "Not allowed to download files",
+    ])
+      assert.ok(!wire.includes(forbidden), forbidden);
+    assert.equal(f.calls.length, 1);
+  }
+});
+
+test("invalid and oversized original error bodies cannot escape the diagnostics budget", async (t) => {
+  for (const body of [
+    "<html>private error page</html>",
+    JSON.stringify({
+      error: {
+        type: "invalid_request_error",
+        code: "permission_denied",
+        message: "x".repeat(9000),
+      },
+    }),
+  ]) {
+    const f = setup(
+      t,
+      async () =>
+        new Response(body, {
+          status: 403,
+          headers: { "x-request-id": "req_sk-proj-synthetic" },
+        }),
+    );
+    const error: any = await f.gateway
+      .execute(f.token.id, "get", { ref: f.ref, format: "original" })
+      .then(
+        () => assert.fail("must reject"),
+        (e) => e,
+      );
+    assert.deepEqual(error.diagnostics, { status: 403 });
+    assert.ok(!publicError(error).includes("req_sk-proj-synthetic"));
+    assert.ok(!publicError(error).includes(body));
+    assert.equal(f.calls.length, 1);
+  }
 });

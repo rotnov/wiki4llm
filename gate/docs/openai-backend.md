@@ -22,7 +22,9 @@ stored; its value is read only by the serving process. Provision a project-scope
 query credential with vector-store search and parsed-content read permissions.
 Original downloads additionally require permission to GET `/v1/files/{file_id}/content`;
 existing credentials are not automatically expanded. A denied download returns
-`ORIGINAL_UNAVAILABLE` with a fixed permission/availability explanation.
+`ORIGINAL_UNAVAILABLE`. That error alone does not establish a permission failure: file-purpose restrictions and availability can also cause rejection. Failed original downloads now include only HTTP status, a request ID matching the bounded `req_` hexadecimal format, and strict allowlisted provider type/code values. An exact provider message denying `assistants` downloads maps to the fixed `purpose_not_downloadable` classification; arbitrary messages are never returned. Diagnostic JSON reads are capped at 8 KiB within the existing request deadline. Malformed/oversized bodies and unknown fields are discarded, not echoed. No automatic retry or credential/purpose substitution occurs.
+
+The ingestion CLI uploads with `purpose="assistants"`. Its reconciliation content-download code and synthetic tests do not establish live download support for that purpose. The [Files content reference](https://developers.openai.com/api/reference/resources/files/methods/content) documents the endpoint without resolving this deployment-specific capability; the [API debugging guidance](https://developers.openai.com/api/reference/overview) explains request IDs. Keep original download acceptance separate from parsed retrieval and mock transport tests. Do not change upload purpose, reindex or expand credentials based only on `ORIGINAL_UNAVAILABLE`.
 Never supply an organization admin key. The CLI does not accept a key value, base
 URL, custom HTTP headers or public write tools. The provider origin is fixed to
 `https://api.openai.com/v1`, with an `OpenAI-Project` header and redirects disabled.
