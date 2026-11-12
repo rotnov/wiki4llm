@@ -346,7 +346,6 @@ export class Gateway {
                 ...describe(w, hit),
                 score: 1 / (61 + rank),
                 snippet: hit.body,
-                ...(hit.excerpts ? { excerpts: hit.excerpts } : {}),
               });
           }
           hits.sort(

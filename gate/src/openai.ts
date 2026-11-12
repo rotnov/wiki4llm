@@ -111,8 +111,8 @@ export class OpenAIBackend implements Backend {
             );
           }
           if (
-            original &&
-            (response.status !== 200 || response.headers.has("content-range"))
+            response.status !== 200 ||
+            response.headers.has("content-range")
           ) {
             await response.body?.cancel();
             throw new GateError("INCOMPLETE_CONTENT");
@@ -254,7 +254,7 @@ export class OpenAIBackend implements Backend {
         }
         for (const excerpt of excerpts)
           if (!hit.excerpts!.includes(excerpt)) hit.excerpts!.push(excerpt);
-        hit.body = hit.excerpts!.join("\n");
+        hit.body = hit.excerpts!.join("\n\n--- excerpt ---\n\n");
       }
     }
     return hits

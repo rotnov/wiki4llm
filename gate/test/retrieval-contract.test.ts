@@ -87,12 +87,9 @@ test("query preserves long and distinct same-document excerpts in canonical orde
   assert.equal(r.results.length, 1);
   assert.equal(
     r.results[0].snippet,
-    "x".repeat(1000) + "answer\ndistinct passage",
+    "x".repeat(1000) + "answer\n\n--- excerpt ---\n\ndistinct passage",
   );
-  assert.deepEqual(r.results[0].excerpts, [
-    "x".repeat(1000) + "answer",
-    "distinct passage",
-  ]);
+  assert.equal("excerpts" in r.results[0], false);
   assert.equal(r.results[0].source.repository, "example/guide");
 });
 test("parsed default and multi_get return complete files; explicit ranges remain bounded", async (t) => {
@@ -387,4 +384,89 @@ test("unsupported parsed representations return an actionable content error", as
   await assert.rejects(f.gateway.execute(f.token.id, "get", { ref: f.ref }), {
     code: "UNSUPPORTED_CONTENT",
   });
+});
+
+test("a single 33000-character query hit fits without duplicated logical text", async (t) => {
+  const passage = "x".repeat(33000);
+  const f = setup(t, async () =>
+    Response.json({
+      data: [{ file_id: "file-1", content: [{ type: "text", text: passage }] }],
+      has_more: false,
+    }),
+  );
+  const result: any = await f.gateway.execute(f.token.id, "query", {
+    query: "x",
+    limit: 1,
+  });
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].snippet, passage);
+  assert.equal("excerpts" in result.results[0], false);
+  assert.equal(JSON.stringify(result).split(passage).length - 1, 1);
+});
+
+test("partial HTTP signals reject parsed and search JSON even with has_more false", async (t) => {
+  for (const tool of ["get", "query"])
+    for (const partial of [
+      { status: 206 },
+      { headers: { "content-range": "bytes 0-99/200" } },
+    ]) {
+      const f = setup(t, async () =>
+        Response.json(
+          {
+            data:
+              tool === "get"
+                ? [{ type: "text", text: "partial body" }]
+                : [
+                    {
+                      file_id: "file-1",
+                      content: [{ type: "text", text: "partial hit" }],
+                    },
+                  ],
+            has_more: false,
+          },
+          partial,
+        ),
+      );
+      await assert.rejects(
+        f.gateway.execute(
+          f.token.id,
+          tool,
+          tool === "get" ? { ref: f.ref } : { query: "x" },
+        ),
+        { code: "INCOMPLETE_CONTENT" },
+      );
+      const parsed = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: tool,
+          arguments: tool === "get" ? { ref: f.ref } : { query: "x" },
+        },
+      };
+      const response = await mcp(
+        new Request("https://gate.example/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify(parsed),
+        }),
+        parsed,
+        f.state,
+        f.gateway,
+        f.token.id,
+        new AbortController().signal,
+      );
+      const result = CallToolResultSchema.parse(
+        ((await response.json()) as any).result,
+      );
+      assert.equal(result.isError, true);
+      const wire = JSON.stringify(result);
+      assert.ok(wire.includes("INCOMPLETE_CONTENT"));
+      assert.ok(!wire.includes("partial body"));
+      assert.ok(!wire.includes("partial hit"));
+      assert.equal(result.structuredContent, undefined);
+    }
 });

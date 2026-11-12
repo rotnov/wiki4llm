@@ -65,16 +65,19 @@ reference limit](https://developers.openai.com/api/reference/resources/vector_st
 with no search pagination. Hits
 are filtered by active store/file membership before snippets are returned. Provider
 filenames/attributes cannot override canonical paths or repositories. Distinct text
-parts from all accepted hits for a document are grouped into `excerpts` in provider
-order; exact duplicate strings collapse, but overlapping distinct excerpts remain.
-`snippet` is their complete newline-joined compatibility representation, without an
-800-character clip. No source offsets are invented. First appearance determines
+parts from all accepted hits for a document are grouped in provider order; exact
+duplicate strings collapse, but overlapping distinct excerpts remain. `snippet`
+is their single complete text representation, without an 800-character clip or
+a second full-text array. The gate inserts `\n\n--- excerpt ---\n\n` between
+excerpts to distinguish boundaries; that separator is not source text. No source
+offsets are invented. First appearance determines
 collection reciprocal-rank ordering (k=60); identical content
 in distinct repositories stays distinct. Cross-workspace ranking uses the existing
 gate reciprocal-rank policy. Filtering can underfill results; exhaustive recall is
 not promised. Search chunks supply excerpts without fetching every document body
-or invoking an LLM. The 64 KiB logical query response budget includes both `snippet`
-and `excerpts`; exceeding it returns `CONTENT_TOO_LARGE`, never a clipped result.
+or invoking an LLM. The 64 KiB logical query response budget includes the single
+`snippet` representation and metadata; exceeding it returns `CONTENT_TOO_LARGE`,
+never a clipped result.
 Reduce the result limit or narrow the query/workspace; an individually oversized
 result requires local retrieval. The response states the first-50-chunk limitation.
 
@@ -108,7 +111,10 @@ last line. `multi_get` starts each document at line 1, uses one shared format an
 optional range limit, preserves order and duplicates, and authorizes all references
 before any download. It fails as a whole on any read error or aggregate overflow.
 
-A provider `has_more=true` fails with `INCOMPLETE_CONTENT`: the documented content
+Explicit partial HTTP responses (206 or Content-Range) fail with
+`INCOMPLETE_CONTENT` on every provider read/search path, including JSON responses
+whose `has_more` is false. A provider `has_more=true` parsed response also fails
+with `INCOMPLETE_CONTENT`: the documented content
 API has no qualified continuation request parameter. A local line range cannot
 complete such a provider response. Unsupported parsed shapes fail explicitly with
 `UNSUPPORTED_CONTENT` and suggest original format or a local source. `complete: true` means the full content available

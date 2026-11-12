@@ -94,7 +94,10 @@ test("fixed-origin authenticated search filters active IDs, deduplicates chunks 
     new Set(["example/guide", "example/second"]),
   );
   assert.equal(result.results[0].source.kind, "openai");
-  assert.equal(result.results[0].snippet, "quartz snippet\nduplicate");
+  assert.equal(
+    result.results[0].snippet,
+    "quartz snippet\n\n--- excerpt ---\n\nduplicate",
+  );
   assert.equal(requests.length, 2);
   for (const r of requests) {
     assert.ok(r.url.startsWith("https://api.openai.com/v1/vector_stores/"));
