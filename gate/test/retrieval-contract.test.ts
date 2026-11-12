@@ -82,14 +82,11 @@ function setup(
   const binary = encodeReference("docs", w.generation!, "second", "manual.pdf");
   return { state, token, gateway, ref, binary, calls, w, manifest, binding };
 }
-test("query preserves long and distinct same-document excerpts in canonical order", async (t) => {
+test("query preserves the full first-ranked excerpt for each canonical document", async (t) => {
   const { gateway, token } = setup(t);
   const r: any = await gateway.execute(token.id, "query", { query: "answer" });
   assert.equal(r.results.length, 1);
-  assert.equal(
-    r.results[0].snippet,
-    "x".repeat(1000) + "answer\n\n--- excerpt ---\n\ndistinct passage",
-  );
+  assert.equal(r.results[0].snippet, "x".repeat(1000) + "answer");
   assert.equal("excerpts" in r.results[0], false);
   assert.equal(r.results[0].source.repository, "example/guide");
 });
@@ -603,4 +600,38 @@ test("invalid and oversized original error bodies cannot escape the diagnostics 
     assert.ok(!publicError(error).includes(body));
     assert.equal(f.calls.length, 1);
   }
+});
+
+test("many same-document provider hits keep discovery within budget at limit three", async (t) => {
+  const first = "quartz ".repeat(800) + "first-ranked answer";
+  const f = setup(t, async (url) =>
+    Response.json({
+      data: Array.from({ length: 50 }, (_, i) => ({
+        file_id: url.includes("vs_test")
+          ? i === 49
+            ? "file-2"
+            : "file-1"
+          : "file-3",
+        content: [
+          {
+            type: "text",
+            text:
+              i === 0 || i === 49
+                ? first
+                : "later passage " + i + " " + "quartz ".repeat(800),
+          },
+        ],
+      })),
+      has_more: false,
+    }),
+  );
+  const result: any = await f.gateway.execute(f.token.id, "query", {
+    query: "quartz",
+    limit: 3,
+  });
+  assert.equal(result.results.length, 3);
+  assert.equal(new Set(result.results.map((hit: any) => hit.ref)).size, 3);
+  assert.ok(result.results.every((hit: any) => hit.snippet === first));
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 65536);
+  assert.equal(f.calls.length, 2);
 });

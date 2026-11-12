@@ -121,7 +121,7 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   list_workspaces:
     "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
   query:
-    "Search authorized workspaces for full matched excerpts. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer a matching local checkout via source.repository + relative path; read with your own tools. Report revision differences; get if local source/tools unavailable. source.sha256 hashes original bytes, not excerpts.",
+    "Discover authorized documents. OpenAI: one full first-ranked excerpt each. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer local repository + relative path with your own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
   get: "Read query ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
   multi_get:
     "Read 1-20 authorized query refs. format parsed (default): full text from first line; optional maxLines 1-200. original: verified bytes (binary MCP resources), no ranges. Prefer accessible local repository + relative path with your own tools; report revision differences. Use get/multi_get if local source/tools unavailable. source.sha256 hashes original bytes, not excerpts.",
@@ -362,7 +362,7 @@ export class Gateway {
               ? {
                   retrieval: {
                     openai:
-                      "First 50 chunks per collection; distinct excerpts grouped by active document before collection reciprocal rank (k=60). No search pagination; results may be incomplete. Excerpts are uncut provider text without source offsets; response budget failures return an error, never truncated passages. Modes control OpenAI embedding/text weights, not QMD-equivalent ranking.",
+                      "First 50 chunks per collection; one full first-ranked excerpt per active document before collection reciprocal rank (k=60). Document discovery, not exhaustive context: later same-document hits are omitted; use get for full content. No search pagination or source offsets. Response budget overflow errors rather than clipping. Modes control OpenAI embedding/text weights, not QMD-equivalent ranking.",
                   },
                 }
               : {}),

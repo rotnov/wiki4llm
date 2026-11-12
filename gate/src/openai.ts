@@ -260,7 +260,7 @@ export class OpenAIBackend implements Backend {
       const active = new Map(
         Object.entries(c.files).map(([path, f]) => [f.file_id, path]),
       );
-      const seen = new Map<string, Hit>();
+      const seen = new Set<string>();
       let rank = 0;
       for (const item of parsed.data.data) {
         if (!item || typeof item !== "object")
@@ -269,6 +269,7 @@ export class OpenAIBackend implements Backend {
         const path = active.get(String(row.file_id));
         if (
           !path ||
+          seen.has(path) ||
           (row.vector_store_id !== undefined &&
             row.vector_store_id !== c.vector_store_id)
         )
@@ -276,20 +277,16 @@ export class OpenAIBackend implements Backend {
         const content = textParts.safeParse(row.content);
         if (!content.success)
           throw new GateError("NOT_FOUND", "Invalid OpenAI search content");
-        const excerpts = content.data.map((x) => x.text);
-        let hit = seen.get(path);
-        if (!hit) {
-          hit = {
-            ...this.document(s, name, path, ""),
-            score: 1 / (61 + rank++),
-            excerpts: [],
-          };
-          seen.set(path, hit);
-          hits.push(hit);
-        }
-        for (const excerpt of excerpts)
-          if (!hit.excerpts!.includes(excerpt)) hit.excerpts!.push(excerpt);
-        hit.body = hit.excerpts!.join("\n\n--- excerpt ---\n\n");
+        seen.add(path);
+        hits.push({
+          ...this.document(
+            s,
+            name,
+            path,
+            content.data.map((x) => x.text).join("\n"),
+          ),
+          score: 1 / (61 + rank++),
+        });
       }
     }
     return hits

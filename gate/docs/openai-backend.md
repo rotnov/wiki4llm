@@ -66,22 +66,23 @@ Search requests at most 50 chunks per collection, matching the [provider search
 reference limit](https://developers.openai.com/api/reference/resources/vector_stores/methods/search),
 with no search pagination. Hits
 are filtered by active store/file membership before snippets are returned. Provider
-filenames/attributes cannot override canonical paths or repositories. Distinct text
-parts from all accepted hits for a document are grouped in provider order; exact
-duplicate strings collapse, but overlapping distinct excerpts remain. `snippet`
-is their single complete text representation, without an 800-character clip or
-a second full-text array. The gate inserts `\n\n--- excerpt ---\n\n` between
-excerpts to distinguish boundaries; that separator is not source text. No source
-offsets are invented. First appearance determines
-collection reciprocal-rank ordering (k=60); identical content
-in distinct repositories stays distinct. Cross-workspace ranking uses the existing
-gate reciprocal-rank policy. Filtering can underfill results; exhaustive recall is
-not promised. Search chunks supply excerpts without fetching every document body
-or invoking an LLM. The 64 KiB logical query response budget includes the single
-`snippet` representation and metadata; exceeding it returns `CONTENT_TOO_LARGE`,
-never a clipped result.
-Reduce the result limit or narrow the query/workspace; an individually oversized
-result requires local retrieval. The response states the first-50-chunk limitation.
+filenames/attributes cannot override canonical paths or repositories. Query is
+**document discovery**: each active document receives one complete excerpt from its
+first provider-ranked hit. The hit's text parts are joined in provider order, and
+`snippet` contains that full text once, without an 800-character clip. Later hits
+for the same file are intentionally omitted; use `get` for full available content.
+No source offsets are invented. First appearance determines collection
+reciprocal-rank ordering (k=60); identical content in distinct repositories stays
+distinct. Cross-workspace ranking retains the existing gate reciprocal-rank policy.
+Filtering can underfill results; exhaustive recall and full context are not promised.
+
+Search does not fetch every document body or invoke an LLM. The 64 KiB logical
+query response budget includes one excerpt and metadata per selected document;
+exceeding it returns `CONTENT_TOO_LARGE`, never a clipped result. The document
+limit remains 1-20. Many hits for one file no longer accumulate into an oversized
+result, but a single very large provider excerpt or up to 20 selected documents
+can still exceed that explicit budget. Reduce the result limit or narrow the
+query/workspace; an individually oversized excerpt requires a local source.
 
 Modes set OpenAI `ranking_options.hybrid_search` embedding/text weights:
 
@@ -188,10 +189,10 @@ required facts are a failed result, not a cost saving.
 
 The current implementation has distinct model-output and provider-work boundaries:
 
-- `src/gateway.ts` returns uncut matched excerpts already supplied by the provider;
-  the response budget errors explicitly if the grouped output does not fit.
+- `src/gateway.ts` returns one uncut first-ranked OpenAI excerpt per document;
+  the response budget errors explicitly if the selected results do not fit.
 - `OpenAIBackend.search` in `src/openai.ts` requests 50 chunks per collection,
-  then groups document excerpts and applies the requested result limit. Reducing
+  then retains the first hit per active document and applies the requested result limit. Reducing
   `query.limit` reduces returned results, not that provider request bound.
 - `OpenAIBackend.read` fetches a complete parsed document before the gateway
   optionally slices explicitly requested lines. `multi_get` reads serially from

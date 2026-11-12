@@ -39,7 +39,6 @@ export interface Document {
 }
 export interface Hit extends Document {
   score: number;
-  excerpts?: string[];
 }
 export interface Backend {
   search(
