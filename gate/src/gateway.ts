@@ -5,7 +5,7 @@ import { resolveSelection, validateSlug } from "./policy.js";
 import { GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
 const MAX_REFERENCE_LENGTH = 8192;
-// Keep parameter guidance in both schemas and tool prose: some connectors flatten schemas.
+// Keep essential guidance in tool prose: some connectors flatten detailed schemas.
 const parameterDescriptions = {
   offset:
     "offset: integer 0-100000, default 0. Use returned nextOffset for the next page; null means no more pages.",
@@ -107,11 +107,15 @@ export const toolSchemas = {
   status: z.object({ workspaces: selectors }).strict(),
 };
 export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
-  list_workspaces: `List workspaces this credential may read. ${parameterDescriptions.offset} ${parameterDescriptions.workspaceLimit}`,
-  query: `Search authorized workspaces. ${parameterDescriptions.query} ${parameterDescriptions.workspaces} ${parameterDescriptions.mode} ${parameterDescriptions.queryLimit}`,
-  get: `Read an exact document reference returned by query. ${parameterDescriptions.ref} ${parameterDescriptions.fromLine} ${parameterDescriptions.maxLines}`,
-  multi_get: `Read exact authorized document references from their first line. ${parameterDescriptions.refs} ${parameterDescriptions.maxLines}`,
-  status: `Get published document counts and available background indexing status for authorized workspaces. ${parameterDescriptions.workspaces}`,
+  list_workspaces:
+    "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
+  query:
+    "Search authorized workspaces. limit 1-20 (default 10). workspaces: names or masks; omitted means all authorized workspaces, at most 20; empty selection rejected. mode: lex, vec or hybrid (default hybrid); QMD lex is model-free, OpenAI modes weight text/embeddings.",
+  get: "Read an exact reference from query. maxLines 1-200 (default 80); fromLine is one-based (default 1).",
+  multi_get:
+    "Read 1-20 exact authorized references from query, starting at the first line. maxLines 1-200 (default 80 per document).",
+  status:
+    "Get document counts and background indexing status. workspaces: authorized names or masks; omitted means all authorized workspaces, at most 20; empty selection rejected.",
 };
 export type ToolName = keyof typeof toolSchemas;
 function parse<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
