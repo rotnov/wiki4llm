@@ -169,16 +169,29 @@ export interface BackgroundJob {
 export interface ProviderFilePage {
   data: Array<{
     id: string;
+    vector_store_id?: unknown;
     status: string;
     attributes?: Record<string, unknown> | null;
+    last_error?: { code?: unknown } | null;
+    usage_bytes?: unknown;
   }>;
   has_more: boolean;
   last_id?: string | null;
+}
+export interface JobDiagnostics {
+  stage: "finalize_attachment";
+  operation_id: string;
+  attachment_status: string;
+  metadata_state: "matching" | "absent" | "empty" | "missing" | "conflict";
+  metadata_field?: string;
+  provider_error_code?: string;
+  usage_bytes?: number;
 }
 export class BackgroundFailure extends Error {
   constructor(
     public readonly code: string,
     public readonly fileId?: string,
+    public readonly diagnostics?: JobDiagnostics,
   ) {
     super(code);
   }
@@ -255,6 +268,14 @@ export class IngestionState {
     )
       this.storage.sql.exec(
         "ALTER TABLE ingest_jobs ADD COLUMN finished_at INTEGER",
+      );
+    if (
+      !this.rows("PRAGMA table_info(ingest_jobs)").some(
+        (r) => r.name === "diagnostics_json",
+      )
+    )
+      this.storage.sql.exec(
+        "ALTER TABLE ingest_jobs ADD COLUMN diagnostics_json TEXT",
       );
   }
   private rows(q: string, ...a: SqlStorageValue[]) {
@@ -838,7 +859,7 @@ export class IngestionState {
   }
   jobStatus(w: string) {
     const r = this.rows(
-      "SELECT id,status,total,completed,error,publication_id,created_at,finished_at FROM ingest_jobs WHERE workspace=?",
+      "SELECT id,status,total,completed,error,publication_id,created_at,finished_at,diagnostics_json FROM ingest_jobs WHERE workspace=?",
       w,
     )[0];
     if (!r) return null;
@@ -852,6 +873,13 @@ export class IngestionState {
       finished_at: finished,
       duration_ms: finished === null ? null : finished - Number(r.created_at),
       ...(r.error ? { error: String(r.error) } : {}),
+      ...(r.diagnostics_json
+        ? {
+            diagnostics: JSON.parse(
+              String(r.diagnostics_json),
+            ) as JobDiagnostics,
+          }
+        : {}),
       ...(r.publication_id ? { publication_id: String(r.publication_id) } : {}),
     };
   }
@@ -1097,22 +1125,70 @@ export class IngestionState {
         const attributes = JSON.parse(
           String(expected.attributes_json),
         ) as Record<string, unknown>;
-        if (expected.store !== job.store)
+        if (expected.store !== job.store || f.vector_store_id !== job.store)
           throw new BackgroundFailure("provider_metadata_store");
         // In-progress provider records may not expose final attributes yet.
         // They cannot become ready until a later completed record passes every check.
         if (f.status === "in_progress") continue;
-        if (!f.attributes)
-          throw new BackgroundFailure(`provider_metadata_absent_${f.status}`);
         const mismatch = Object.entries(attributes).find(
-          ([k, v]) => f.attributes![k] !== v,
+          ([k, v]) => f.attributes?.[k] !== v,
         );
+        const absent = f.attributes == null;
+        const empty =
+          !absent &&
+          typeof f.attributes === "object" &&
+          !Array.isArray(f.attributes) &&
+          Object.keys(f.attributes!).length === 0;
+        const diagnostics: JobDiagnostics = {
+          stage: "finalize_attachment",
+          operation_id: String(expected.operation_id),
+          attachment_status: f.status,
+          metadata_state: absent
+            ? "absent"
+            : empty
+              ? "empty"
+              : mismatch
+                ? Object.hasOwn(f.attributes!, mismatch[0])
+                  ? "conflict"
+                  : "missing"
+                : "matching",
+          ...(!absent && !empty && mismatch
+            ? { metadata_field: mismatch[0] }
+            : {}),
+        };
+        if (f.last_error?.code !== undefined)
+          diagnostics.provider_error_code = [
+            "server_error",
+            "unsupported_file",
+            "invalid_file",
+          ].includes(String(f.last_error.code))
+            ? String(f.last_error.code)
+            : "unrecognized";
+        if (
+          typeof f.usage_bytes === "number" &&
+          Number.isSafeInteger(f.usage_bytes) &&
+          f.usage_bytes >= 0
+        )
+          diagnostics.usage_bytes = f.usage_bytes;
+        // A terminal owned file cannot publish. Empty metadata must not hide its
+        // terminal state, but nonempty conflicts still forbid automatic retirement.
+        if (
+          (f.status === "failed" || f.status === "cancelled") &&
+          (absent || empty || !mismatch)
+        )
+          throw new BackgroundFailure("ingestion_failed", f.id, diagnostics);
+        if (absent)
+          throw new BackgroundFailure(
+            `provider_metadata_absent_${f.status}`,
+            undefined,
+            diagnostics,
+          );
         if (mismatch)
           throw new BackgroundFailure(
             `provider_metadata_${mismatch[0]}_${f.status}`,
+            undefined,
+            diagnostics,
           );
-        if (f.status === "failed" || f.status === "cancelled")
-          throw new BackgroundFailure("ingestion_failed", f.id);
         if (f.status === "completed")
           this.storage.sql.exec(
             "UPDATE ingest_job_files SET ready=1 WHERE workspace=? AND file_id=?",
@@ -1154,7 +1230,13 @@ export class IngestionState {
       );
     });
   }
-  failJob(job: BackgroundJob, code: string, retry: boolean, fileId?: string) {
+  failJob(
+    job: BackgroundJob,
+    code: string,
+    retry: boolean,
+    fileId?: string,
+    diagnostics?: JobDiagnostics,
+  ) {
     this.storage.transactionSync(() => {
       if (!this.validJob(job)) return;
       if (fileId) {
@@ -1188,7 +1270,7 @@ export class IngestionState {
         job.workspace,
       );
       this.storage.sql.exec(
-        "UPDATE ingest_jobs SET status=?,revision=revision+1,error=?,attempts=attempts+1,next_at=?,finished_at=? WHERE workspace=?",
+        "UPDATE ingest_jobs SET status=?,revision=revision+1,error=?,attempts=attempts+1,next_at=?,finished_at=?,diagnostics_json=? WHERE workspace=?",
         retry ? "pending" : "failed",
         code,
         retry
@@ -1196,6 +1278,7 @@ export class IngestionState {
               Math.min(900000, 30000 * 2 ** Math.min(job.attempts, 5))
           : 0,
         retry ? null : Date.now(),
+        diagnostics ? JSON.stringify(diagnostics) : null,
         job.workspace,
       );
     });

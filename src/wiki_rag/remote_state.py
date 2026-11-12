@@ -44,6 +44,49 @@ def number(value, minimum=0):
     return value
 
 
+def validate_job_diagnostics(value):
+    """Accept only bounded machine diagnostics, never provider prose or source metadata."""
+    required = {"stage", "operation_id", "attachment_status", "metadata_state"}
+    optional = {"metadata_field", "provider_error_code", "usage_bytes"}
+    enums = {
+        "stage": {"finalize_attachment"},
+        "attachment_status": {"in_progress", "completed", "failed", "cancelled"},
+        "metadata_state": {"matching", "absent", "empty", "missing", "conflict"},
+        "metadata_field": {
+            "repository",
+            "path",
+            "commit",
+            "kind",
+            "collection",
+            "branch",
+            "sha256",
+            "operation_id",
+            "source_kind",
+        },
+        "provider_error_code": {"server_error", "unsupported_file", "invalid_file", "unrecognized"},
+    }
+    if (
+        not isinstance(value, dict)
+        or not required <= value.keys() <= required | optional
+        or any(
+            not isinstance(value[k], str) or value[k] not in choices
+            for k, choices in enums.items()
+            if k in value
+        )
+        or not isinstance(value["operation_id"], str)
+        or not re.fullmatch(r"[a-f0-9]{64}", value["operation_id"])
+        or (
+            "usage_bytes" in value
+            and (
+                type(value["usage_bytes"]) is not int
+                or not 0 <= value["usage_bytes"] <= SAFE_INTEGER
+            )
+        )
+    ):
+        raise AuthorityError("invalid authority job diagnostics")
+    return value
+
+
 def decode(data):
     def unique(pairs):
         value = {}
@@ -268,6 +311,8 @@ class RemoteState:
                 or not re.fullmatch(r"[a-z0-9_-]{1,80}", job["error"])
             ):
                 raise AuthorityError("invalid authority job error")
+            if "diagnostics" in job:
+                validate_job_diagnostics(job["diagnostics"])
             if "publication_id" in job and (
                 not isinstance(job["publication_id"], str)
                 or not re.fullmatch(r"[0-9a-f-]{36}", job["publication_id"])

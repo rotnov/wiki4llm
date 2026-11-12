@@ -58,6 +58,50 @@ def test_publication_wait_reports_terminal_reason(status):
         gha().wait_for_publication(Remote(), "a" * 36)
 
 
+def test_publication_wait_reports_bounded_diagnostics():
+    diagnostics = {
+        "stage": "finalize_attachment",
+        "operation_id": "b" * 64,
+        "attachment_status": "failed",
+        "metadata_state": "empty",
+        "provider_error_code": "invalid_file",
+        "usage_bytes": 0,
+    }
+
+    class Remote:
+        def status(self):
+            return {"job": {"id": "a" * 36, "status": "failed", "diagnostics": diagnostics}}
+
+    with pytest.raises(RagError) as error:
+        gha().wait_for_publication(Remote(), "a" * 36)
+    assert json.dumps(diagnostics, sort_keys=True) in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"message": "private-provider-prose"},
+        {"operation_id": "private-id"},
+        {"attachment_status": "private-status"},
+        {"metadata_field": "private-field"},
+        {"provider_error_code": "private-code"},
+        {"usage_bytes": -1},
+        {"usage_bytes": True},
+    ],
+)
+def test_job_diagnostics_reject_private_or_invalid_fields(bad):
+    from wiki_rag.remote_state import validate_job_diagnostics
+
+    valid = {
+        "stage": "finalize_attachment",
+        "operation_id": "b" * 64,
+        "attachment_status": "failed",
+        "metadata_state": "empty",
+    }
+    with pytest.raises(RagError, match="invalid authority job diagnostics"):
+        validate_job_diagnostics({**valid, **bad})
+
+
 @pytest.mark.parametrize("job", [None, {"id": "b" * 36, "status": "complete"}])
 def test_publication_wait_cannot_accept_another_job(job):
     class Remote:

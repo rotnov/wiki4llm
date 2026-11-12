@@ -62,7 +62,13 @@ export class BackgroundFinalizer {
         if (error instanceof ProviderRetry)
           this.ingestion.failJob(job, "provider_retry", true);
         else if (error instanceof BackgroundFailure)
-          this.ingestion.failJob(job, error.code, false, error.fileId);
+          this.ingestion.failJob(
+            job,
+            error.code,
+            false,
+            error.fileId,
+            error.diagnostics,
+          );
         else this.ingestion.failJob(job, "finalization_error", false);
       }
     } finally {

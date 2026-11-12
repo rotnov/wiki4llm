@@ -1,5 +1,6 @@
 """Concurrent uploads and batched attachment submission; journal writes stay serial."""
 
+import json
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -63,6 +64,18 @@ def stage_files(cfg, state, selected, provider):
                 op = ops.get(oid)
                 attempts = 1
                 if op and op.get("terminal_failure"):
+                    print(
+                        "wiki-rag: "
+                        + json.dumps(
+                            {
+                                "event": "terminal_recovery_candidate",
+                                "operation_id": oid,
+                                "source_bytes": len(file.content),
+                                "ingestion_attempts": op.get("ingestion_attempts", 1),
+                            }
+                        ),
+                        file=sys.stderr,
+                    )
                     attempts = op.get("ingestion_attempts", 1) + 1
                     if attempts > 3:
                         raise RagError(

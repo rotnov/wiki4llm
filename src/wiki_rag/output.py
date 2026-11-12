@@ -1,5 +1,7 @@
 """Aggregate ingestion diagnostics for logs without source-file metadata."""
 
+from .remote_state import validate_job_diagnostics
+
 
 def summarize(result):
     """Keep configured labels, revisions and counts; never copy path/error records."""
@@ -25,6 +27,8 @@ def summarize(result):
                 "duration_ms",
             }
         }
+        if "diagnostics" in result["job"]:
+            summary["job"]["diagnostics"] = validate_job_diagnostics(result["job"]["diagnostics"])
     summary["collections"] = {}
     for name, collection in result.get("collections", {}).items():
         changes = collection["changes"]

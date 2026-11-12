@@ -33,6 +33,15 @@ chunking checks, followed by readback. Conflicting nonempty attributes and missi
 attachments remain unresolved; inspect the evidence instead of changing journal
 phases manually. See `docs/remote-state.md` for the precise recovery boundary.
 
+An explicit metadata-update rejection that says ingestion is incomplete can be
+transient. Preserve the intent and inspect current provider/journal progress before
+retrying; later reconciliation may find complete attributes without another write.
+Distinguish that HTTP failure from a background `failed` attachment: the latter's
+job diagnostics identify its operation, status, metadata state, recognized provider
+error code and vector-store usage bytes. Empty metadata must not mask a terminal
+owned-file failure; conflicting nonempty metadata still blocks automatic recovery.
+Use the operation ID to correlate the next publisher's source-size/attempt log.
+
 Run from the repository root with nonsecret `RAG_CONFIG` set to the reviewed TOML
 path and credentials injected through the documented environment variables:
 

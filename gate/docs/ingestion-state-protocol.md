@@ -341,6 +341,15 @@ ID and creates no new job. The publisher status command reports:
 
 Statuses are `pending`, `complete`, `failed`, `superseded` and `revoked`.
 Failures carry a sanitized `error` code; completion carries `publication_id`.
+Attachment verification failures additionally carry optional `diagnostics`: fixed
+`stage: finalize_attachment`, the owned hex `operation_id`, `attachment_status`,
+and `metadata_state` (`matching`, `absent`, `empty`, `missing`, or `conflict`).
+When available, `metadata_field` names an expected field, `provider_error_code`
+is one of `server_error`, `unsupported_file`, `invalid_file`, or `unrecognized`,
+and `usage_bytes` is a nonnegative safe integer. The latter is provider vector-store
+usage, not uploaded source size. Provider prose, attribute values and file paths
+are excluded. Diagnostics persist in a nullable job column; older jobs omit them.
+The publisher validates this bounded shape before printing it in the GHA failure.
 Timestamps use Unix milliseconds. Terminal transitions record `finished_at` and
 `duration_ms = finished_at - created_at`; legacy terminal jobs keep these fields
 null because their completion time was not recorded. Timing fields are stable
@@ -382,6 +391,14 @@ sync/no-op, whose write credential can retire obsolete owned resources. Selected
 unpublished operation IDs are retained during that cleanup so interrupted uploads
 can resume. Cleanup uncertainty before a new submission preserves the old
 publication and fails the attempt explicitly.
+
+For an acknowledged owned file, `failed` or `cancelled` with matching, empty or
+absent attributes records a terminal failure even when metadata never finalized.
+Nonempty metadata that does not match every expected field remains an unresolved
+conflict and does not authorize automatic retirement. Completed files still require
+all original attributes to match before publication. The next publisher recovery
+logs the operation ID, selected source byte count and existing attempt count; the
+three-attempt bound remains unchanged.
 
 ## Verified derived-source extension
 

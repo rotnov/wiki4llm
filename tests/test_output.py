@@ -51,12 +51,19 @@ def test_status_summary_preserves_safe_job_timing():
         "finished_at": 3000,
         "duration_ms": 2000,
         "error": "provider_metadata",
+        "diagnostics": {
+            "stage": "finalize_attachment",
+            "operation_id": "a" * 64,
+            "attachment_status": "failed",
+            "metadata_state": "empty",
+        },
         "private": "must not appear",
     }
     summary = summarize({"mode": "status", "job": job})
     assert summary["job"]["duration_ms"] == 2000
     assert summary["job"]["created_at"] == 1000 and summary["job"]["finished_at"] == 3000
     assert "private" not in summary["job"]
+    assert summary["job"]["diagnostics"] == job["diagnostics"]
 
 
 @pytest.mark.parametrize("mode", ["plan", "sync"])

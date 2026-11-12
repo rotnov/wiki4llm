@@ -17,7 +17,7 @@ from .config import RagError, config_from_mapping, integer, keys, lexical_path, 
 from .output import summarize
 from .provider import OpenAIProvider
 from .remote_engine import run_remote
-from .remote_state import RemoteState
+from .remote_state import RemoteState, validate_job_diagnostics
 
 INPUT_ENV = {
     "WIKI_RAG_GATE_ORIGIN",
@@ -301,6 +301,10 @@ def wait_for_publication(remote, job_id, *, monotonic=time.monotonic, sleep=time
             return job
         if state != "pending":
             reason = job.get("error", "no provider error reported")
+            if "diagnostics" in job:
+                reason += "; " + json.dumps(
+                    validate_job_diagnostics(job["diagnostics"]), sort_keys=True
+                )
             raise RagError(f"publication job {job_id}: {state} ({reason})")
         print(
             f"wiki-rag: publication {job_id}: pending ({job['completed']}/{job['total']})",

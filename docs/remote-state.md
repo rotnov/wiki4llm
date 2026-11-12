@@ -80,6 +80,14 @@ truncation. Request bodies, document bytes, headers and complete response bodies
 are never serialized. Provider prose redaction is best-effort; keep consumer logs
 as private operational records rather than publishing them as generic tool artifacts.
 
+Background attachment failures expose bounded job diagnostics through publisher
+status and the GHA observer: operation ID, attachment status, metadata state/field,
+recognized provider error code and vector-store usage bytes when available.
+The [ingestion protocol](../gate/docs/ingestion-state-protocol.md) owns the exact
+shape and terminal-recovery boundary. A later publisher logs selected source bytes
+and the existing attempt count for that operation; source and vector-store sizes
+measure different things. No provider prose is included in these job diagnostics.
+
 After attachment submission and a matching rescan, `submit` durably captures the
 exact manifest. The CLI returns `mode: submitted` and `job_id`, without waiting for
 OpenAI indexing. A Durable Object alarm verifies readiness and atomically publishes

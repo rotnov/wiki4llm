@@ -451,6 +451,116 @@ test("metadata failure names the field and state without leaking its value", asy
   }
 });
 
+for (const terminal of ["failed", "cancelled"]) {
+  for (const attributes of [null, undefined, {}]) {
+    test(`owned ${terminal} file with ${JSON.stringify(attributes)} attributes records bounded recovery`, async () => {
+      const f = await setup();
+      try {
+        await f.submit();
+        await f.release();
+        f.files[0]!.attributes = attributes;
+        f.files[0]!.last_error = {
+          code: "invalid_file",
+          message: "private-provider-explanation",
+        };
+        f.files[0]!.usage_bytes = 0;
+        f.setState(terminal);
+        await f.tick();
+        const status = await f.status();
+        assert.equal(status.publication, null);
+        assert.equal(status.job.status, "failed");
+        assert.equal(status.job.error, "ingestion_failed");
+        assert.deepEqual(status.job.diagnostics, {
+          stage: "finalize_attachment",
+          operation_id: "1".repeat(64),
+          attachment_status: terminal,
+          metadata_state: attributes == null ? "absent" : "empty",
+          provider_error_code: "invalid_file",
+          usage_bytes: 0,
+        });
+        assert.ok(!JSON.stringify(status).includes("private-provider"));
+        const lease = await f.acquire();
+        const lookup = await f.ok("/ingest/demo/operations", {
+          epoch: lease.epoch,
+          nonce: "d".repeat(64),
+          revision: (await f.status()).revision,
+          ids: ["1".repeat(64)],
+        });
+        assert.equal(lookup.items[0].operation.phase, "ingestion_failed");
+        assert.equal(lookup.items[0].operation.terminal_failure, true);
+        assert.equal(lookup.items[0].operation.ingestion_attempts, 1);
+      } finally {
+        await f.mf.dispose();
+      }
+    });
+  }
+}
+
+test("terminal metadata conflict is diagnosed without permitting retirement", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    await f.release();
+    f.setState("failed");
+    (f.files[0]!.attributes as Record<string, unknown>).branch =
+      "private-branch";
+    f.files[0]!.last_error = {
+      code: "private-code",
+      message: "private-message",
+    };
+    f.files[0]!.usage_bytes = -1;
+    await f.tick();
+    const status = await f.status();
+    assert.equal(status.job.error, "provider_metadata_branch_failed");
+    assert.deepEqual(status.job.diagnostics, {
+      stage: "finalize_attachment",
+      operation_id: "1".repeat(64),
+      attachment_status: "failed",
+      metadata_state: "conflict",
+      metadata_field: "branch",
+      provider_error_code: "unrecognized",
+    });
+    assert.ok(!JSON.stringify(status.job).includes("private-"));
+    assert.equal(status.publication, null);
+    const lease = await f.acquire();
+    const lookup = await f.ok("/ingest/demo/operations", {
+      epoch: lease.epoch,
+      nonce: "d".repeat(64),
+      revision: (await f.status()).revision,
+      ids: ["1".repeat(64)],
+    });
+    assert.equal(lookup.items[0].operation.phase, "attached");
+    assert.equal(lookup.items[0].operation.terminal_failure, undefined);
+  } finally {
+    await f.mf.dispose();
+  }
+});
+
+test("terminal record from a different store cannot authorize recovery", async () => {
+  const f = await setup();
+  try {
+    await f.submit();
+    await f.release();
+    f.setState("failed");
+    f.files[0]!.attributes = {};
+    f.files[0]!.vector_store_id = "vs_other";
+    await f.tick();
+    const status = await f.status();
+    assert.equal(status.job.error, "provider_metadata_store");
+    assert.equal(status.publication, null);
+    const lease = await f.acquire();
+    const lookup = await f.ok("/ingest/demo/operations", {
+      epoch: lease.epoch,
+      nonce: "d".repeat(64),
+      revision: (await f.status()).revision,
+      ids: ["1".repeat(64)],
+    });
+    assert.equal(lookup.items[0].operation.phase, "attached");
+  } finally {
+    await f.mf.dispose();
+  }
+});
+
 for (const absent of [null, undefined, {}]) {
   test(`in-progress files with ${JSON.stringify(absent)} attributes wait for verified completion`, async () => {
     const f = await setup();
