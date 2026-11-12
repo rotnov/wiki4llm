@@ -113,8 +113,11 @@ try {
         arguments: { query: "quartz", mode: "lex" },
       });
       assert.equal(found.isError, undefined);
-      assert.equal(found.structuredContent.results.length, 1);
-      const hit = found.structuredContent.results[0];
+      assert.equal(found.structuredContent, undefined);
+      assert.equal(found.content[0]?.type, "text");
+      const payload = JSON.parse(found.content[0].text);
+      assert.equal(payload.results.length, 1);
+      const hit = payload.results[0];
       assert.equal(hit.workspace, "amplifier");
       if (previousRef) assert.equal(hit.ref, previousRef);
       previousRef = hit.ref;
@@ -122,7 +125,10 @@ try {
         name: "get",
         arguments: { ref: hit.ref },
       });
-      assert.match(read.structuredContent.text, /amplifier/);
+      assert.equal(read.isError, undefined);
+      assert.equal(read.structuredContent, undefined);
+      assert.equal(read.content[0]?.type, "text");
+      assert.match(JSON.parse(read.content[0].text).text, /amplifier/);
       const denied: any = await client.callTool({
         name: "status",
         arguments: { workspaces: ["dsx"] },

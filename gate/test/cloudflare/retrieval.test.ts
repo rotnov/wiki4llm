@@ -6,6 +6,7 @@ import { build } from "esbuild";
 import { Miniflare, Log, LogLevel, Response as MFResponse } from "miniflare";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { encodeReference } from "../../src/gateway.js";
+import { toolPayload } from "../tool-payload.js";
 
 test("workerd verifies original hashes and emits exact PDF resources without native dependencies", async () => {
   const pdf = Buffer.from("%PDF-1.7\n\x00\xffsynthetic\n%%EOF", "latin1");
@@ -95,15 +96,24 @@ test("workerd verifies original hashes and emits exact PDF resources without nat
         undefined,
         JSON.stringify({ result, calls }),
       );
-      const resource: any = result.content.find((c) => c.type === "resource");
+      const payload = toolPayload(result);
+      const resources = result.content.filter((c) => c.type === "resource");
+      assert.equal(resources.length, 1);
+      const resource: any = resources[0];
       assert.equal(resource.resource.mimeType, "application/pdf");
       assert.deepEqual(Buffer.from(resource.resource.blob, "base64"), pdf);
       assert.equal(
         JSON.stringify(result).split(pdf.toString("base64")).length - 1,
         1,
       );
-      if ("refs" in args)
-        assert.equal((result.structuredContent as any).documents[1].text, text);
+      if ("refs" in args) {
+        assert.equal(payload.documents[1].text, text);
+        assert.equal(payload.documents[1].complete, true);
+        const escapedText = JSON.stringify(
+          JSON.stringify(text).slice(1, -1),
+        ).slice(1, -1);
+        assert.equal(JSON.stringify(wire).split(escapedText).length - 1, 1);
+      }
     }
     assert.ok(
       calls.every((url) => url.startsWith("https://api.openai.com/v1/files/")),

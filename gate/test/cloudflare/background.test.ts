@@ -1,3 +1,4 @@
+import { toolPayload } from "../tool-payload.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -646,7 +647,7 @@ test("authorized MCP readers see the latest indexing job without publisher crede
       params: { name: "status", arguments: { workspaces: ["demo"] } },
     };
     const result = await f.ok("/mcp", request, "user:reader");
-    const w = result.result.structuredContent.workspaces[0];
+    const w = toolPayload(result.result).workspaces[0];
     assert.equal(w.documents, 1);
     assert.equal(w.indexing.status, "complete");
     assert.ok(w.indexing.finished_at >= w.indexing.created_at);

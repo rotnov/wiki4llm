@@ -152,18 +152,26 @@ preprocessing/kind: native PDF is `application/pdf`, Markdown is UTF-8
 `text/markdown`, and other uploaded text is UTF-8 `text/plain`. Original source line
 basis is `original-text` for text and `none` for binary.
 
+Successful MCP calls serialize their payload once as JSON in the first text
+content item, omitting `structuredContent`. None of the tools advertises an
+`outputSchema`; the [MCP tool-result contract](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#tool-result)
+supports text content without structured output. Clients must parse that JSON
+text to read the payload; clients depending exclusively on `structuredContent`
+must migrate. Tool errors retain `isError: true` and their existing text error.
+
 Binary originals are standard MCP embedded resources with `{uri, mimeType, blob}`;
-`blob` is base64 and appears exactly once in the tool's `content`. JSON text and
-`structuredContent` contain metadata and the resource URI/MIME, never binary data.
+`blob` is base64 and appears exactly once per binary document in the tool's
+`content`. The JSON text contains metadata and the resource URI/MIME, never binary data.
 The URI is the canonical `qgdoc:` reference, not a downloadable public URL or
 credential. The gate does not advertise a separate resources/read endpoint; repeat
 `get` to download again with fresh authorization. Every format retains current-grant,
 token and generation checks before access and before delivery.
 
 The pinned MCP TypeScript SDK 1.32.2 supports this [embedded resource representation](https://github.com/modelcontextprotocol/typescript-sdk/blob/1.32.2/docs/server.md).
-Tests validate bytes through the official native HTTP client and Cloudflare MCP
-handler/result schema, including multi_get. This qualifies the protocol, not a
-particular application's attachment UI. Clients must consume embedded `resource.blob`
+Tests validate complete text and bytes through the official native HTTP client
+and Cloudflare MCP handler/result schema, including multi_get. This qualifies the
+protocol; live cloud-connector forwarding and application attachment UI require
+separate acceptance. Clients must consume embedded `resource.blob`
 content to save binary files; text-only clients should use parsed format or their
 local file tools. Live binary acceptance remains blocked by the observed original
 download restriction; no live binary read was attempted after the text-file denial.
@@ -171,7 +179,7 @@ Codex/Claude attachment rendering is not qualified here.
 
 Each provider response (JSON envelope for parsed/search, raw bytes for original)
 is bounded to 2 MiB; a get/multi_get logical result is bounded to 4 MiB, including
-base64 and metadata. MCP text/structured metadata can add serialization overhead,
+base64 and metadata. MCP text encoding and resource metadata can add serialization overhead,
 so 4 MiB is not a total HTTP wire limit. Larger originals require a local/source
 route; parsed ranges still fetch the complete provider response and cannot bypass
 its 2 MiB bound. Excess size returns `CONTENT_TOO_LARGE` with recovery guidance,

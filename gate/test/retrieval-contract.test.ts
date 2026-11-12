@@ -13,6 +13,7 @@ import { OpenAIBackend } from "../src/openai.js";
 import { publicError } from "../src/errors.js";
 import { startServer } from "../src/http.js";
 import { mcp } from "../src/cloudflare/mcp.js";
+import { toolPayload } from "./tool-payload.js";
 const text =
   "\ufeff" +
   Array.from({ length: 450 }, (_, i) => `line ${i + 1}`).join("\r\n");
@@ -137,7 +138,7 @@ test("original text is byte-faithful including BOM and CRLF, with checked digest
   );
 });
 for (const transport of ["native", "worker"] as const)
-  test(`${transport} MCP carries original binary once in a validated embedded resource`, async (t) => {
+  test(`${transport} MCP carries complete text and original binary once`, async (t) => {
     const { state, gateway, token, binary, ref } = setup(t);
     let call: (args: any) => Promise<any>;
     if (transport === "native") {
@@ -152,6 +153,8 @@ for (const transport of ["native", "worker"] as const)
           requestInit: { headers: { Authorization: `Bearer ${token.secret}` } },
         }),
       );
+      for (const tool of (await client.listTools()).tools)
+        assert.equal(tool.outputSchema, undefined);
       call = async (args) =>
         client.callTool({
           name: args.refs ? "multi_get" : "get",
@@ -184,12 +187,31 @@ for (const transport of ["native", "worker"] as const)
       };
     }
     for (const args of [
+      { ref },
+      { refs: [ref] },
+      { ref, format: "original" },
       { ref: binary, format: "original" },
       { refs: [binary, ref], format: "original" },
     ]) {
       const r = CallToolResultSchema.parse(await call(args));
-      assert.equal(r.isError, undefined);
+      const payload = toolPayload(r);
+      const documents = payload.documents ?? [payload];
+      const textDocument = documents.find((d: any) => d.text !== undefined);
+      if (textDocument) {
+        assert.equal(textDocument.text, text);
+        assert.equal(textDocument.complete, true);
+        // Count the entire escaped document in the complete tool envelope.
+        const escapedText = JSON.stringify(
+          JSON.stringify(text).slice(1, -1),
+        ).slice(1, -1);
+        assert.equal(JSON.stringify(r).split(escapedText).length - 1, 1);
+      }
       const resources = r.content.filter((c) => c.type === "resource");
+      if (!documents.some((d: any) => d.resource)) {
+        assert.equal(resources.length, 0);
+        assert.ok(textDocument);
+        continue;
+      }
       assert.equal(resources.length, 1);
       const resource: any = resources[0]!.resource;
       assert.equal(resource.mimeType, "application/pdf");
@@ -199,11 +221,18 @@ for (const transport of ["native", "worker"] as const)
         JSON.stringify(r).split(pdf.toString("base64")).length - 1,
         1,
       );
-      assert.ok(!JSON.stringify(r.structuredContent).includes('"blob"'));
+      assert.ok(!JSON.stringify(payload).includes('"blob"'));
+      assert.deepEqual(documents.find((d: any) => d.resource).resource, {
+        uri: binary,
+        mimeType: "application/pdf",
+      });
     }
     state.setPrincipal("reader", { allow: [], deny: [] });
     const denied = await call({ ref: binary, format: "original" });
     assert.equal(denied.isError, true);
+    assert.equal(denied.structuredContent, undefined);
+    assert.equal(denied.content.length, 1);
+    assert.equal(denied.content[0].type, "text");
     assert.ok(!JSON.stringify(denied).includes(pdf.toString("base64")));
   });
 test("every format refuses stale, denied, forged and injected file references before access", async (t) => {

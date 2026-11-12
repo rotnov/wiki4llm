@@ -3,6 +3,7 @@ import type {
   EmbeddedResource,
 } from "@modelcontextprotocol/sdk/types.js";
 
+// JSON appears once in text content; tools do not advertise outputSchema.
 // Binary bytes appear once as standard MCP resource content, never JSON text.
 export function toolResult(output: Record<string, unknown>): CallToolResult {
   const resources: EmbeddedResource[] = [];
@@ -17,14 +18,10 @@ export function toolResult(output: Record<string, unknown>): CallToolResult {
     resources.push({ type: "resource", resource: { uri, mimeType, blob } });
     return { ...rest, resource: { uri, mimeType } };
   };
-  const structuredContent = Array.isArray(output.documents)
+  const payload = Array.isArray(output.documents)
     ? { ...output, documents: output.documents.map(describe) }
     : describe(output);
   return {
-    content: [
-      { type: "text", text: JSON.stringify(structuredContent) },
-      ...resources,
-    ],
-    structuredContent,
+    content: [{ type: "text", text: JSON.stringify(payload) }, ...resources],
   };
 }

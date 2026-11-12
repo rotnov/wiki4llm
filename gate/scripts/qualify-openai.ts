@@ -164,7 +164,10 @@ async function main() {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = await client!.callTool({ name, arguments: args });
     assert.notEqual(r.isError, true);
-    return r.structuredContent as any;
+    assert.equal(r.structuredContent, undefined);
+    const content = r.content as { type: string; text: string }[];
+    assert.equal(content[0]?.type, "text");
+    return JSON.parse(content[0]!.text);
   };
   const queryReady = async () => {
     const end = Date.now() + 240000;

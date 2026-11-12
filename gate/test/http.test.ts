@@ -1,3 +1,4 @@
+import { toolPayload } from "./tool-payload.js";
 import { assertParameterGuidance } from "./tool-discovery.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -83,7 +84,7 @@ test("official MCP client authenticates each request, scopes tools, and cannot r
       arguments: {},
     });
     assert.deepEqual(
-      result.structuredContent.workspaces.map((w: any) => w.id),
+      toolPayload(result).workspaces.map((w: any) => w.id),
       ["amplifier"],
     );
     const denied: any = await client.callTool({

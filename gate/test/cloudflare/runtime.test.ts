@@ -1,3 +1,4 @@
+import { toolPayload } from "../tool-payload.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
@@ -280,10 +281,9 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           (await rpc("list_workspaces", {}, "operator")).isError,
           true,
         );
-        assert.deepEqual(
-          (await rpc("list_workspaces")).structuredContent.workspaces,
-          [{ id: "example", indexed: true }],
-        );
+        assert.deepEqual(toolPayload(await rpc("list_workspaces")).workspaces, [
+          { id: "example", indexed: true },
+        ]);
       },
     );
     await t.test(
@@ -326,8 +326,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
     await t.test(
       "query provenance, exact get, forbidden mixed multi_get has zero upstream calls",
       async () => {
-        const result = (await rpc("query", { query: "fixture" }))
-          .structuredContent;
+        const result = toolPayload(await rpc("query", { query: "fixture" }));
         assert.equal(result.results.length, 2);
         assert.notEqual(result.results[0].ref, result.results[1].ref);
         assert.notEqual(
@@ -335,8 +334,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           result.results[1].source.repository,
         );
         assert.equal(
-          (await rpc("get", { ref: result.results[0].ref })).structuredContent
-            .text,
+          toolPayload(await rpc("get", { ref: result.results[0].ref })).text,
           "line one\nline two",
         );
         const foreign =
@@ -376,9 +374,9 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         p.release();
         assert.equal((await pending).isError, true);
         await principal();
-        const refs = (
-          await rpc("query", { query: "fixture" })
-        ).structuredContent.results.map((x: any) => x.ref);
+        const refs = toolPayload(
+          await rpc("query", { query: "fixture" }),
+        ).results.map((x: any) => x.ref);
         p = pause();
         pending = rpc("multi_get", { refs });
         await p.entered;
@@ -772,16 +770,16 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           ...Array.from({ length: 18 }, (_, i) => `large-${i}`),
         ];
         assert.equal(
-          (await rpc("status", { workspaces: ids })).structuredContent
-            .workspaces.length,
+          toolPayload(await rpc("status", { workspaces: ids })).workspaces
+            .length,
           20,
         );
         const query = await rpc("query", { query: "large", workspaces: ids });
-        assert.equal(query.structuredContent.searchedWorkspaces.length, 20);
+        assert.equal(toolPayload(query).searchedWorkspaces.length, 20);
         await mf.dispose();
         mf = new Miniflare(options());
         assert.equal(
-          (await rpc("status", { workspaces: ["large"] })).structuredContent
+          toolPayload(await rpc("status", { workspaces: ["large"] }))
             .workspaces[0].documents,
           10000,
         );
@@ -805,7 +803,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         await mf.dispose();
         mf = new Miniflare(options());
         assert.equal(
-          (await rpc("status", { workspaces: ["example"] })).structuredContent
+          toolPayload(await rpc("status", { workspaces: ["example"] }))
             .workspaces[0].id,
           "example",
         );

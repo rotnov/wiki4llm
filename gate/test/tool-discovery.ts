@@ -29,6 +29,11 @@ export function assertParameterGuidance(tools: any[]) {
   for (const [name, fields] of Object.entries(expected)) {
     const tool = tools.find((t) => t.name === name);
     assert.ok(tool, name);
+    assert.equal(
+      tool.outputSchema,
+      undefined,
+      `${name} uses JSON text content`,
+    );
     for (const [field, terms] of Object.entries(fields)) {
       for (const term of terms) {
         assert.ok(

@@ -58,6 +58,8 @@ Principal edits replace all rules. `*` grants all registered data workspaces; `t
 
 ## MCP contract
 
+Successful calls return one JSON payload in the first `content` item (`type: "text"`), without a duplicate `structuredContent` field. Tools do not advertise `outputSchema`. Consumers that previously read `structuredContent` must parse the JSON text instead. Binary originals add an embedded resource per binary document; bytes occur only in its `resource.blob`, while the JSON payload retains metadata and the resource URI/MIME. Tool failures retain `isError: true` and a text error, which is not a JSON success payload. Native SDK and Worker transport tests cover this contract; individual cloud connectors and attachment interfaces still require live acceptance.
+
 | Tool              | Purpose                                                     |
 | ----------------- | ----------------------------------------------------------- |
 | `list_workspaces` | Paginated authorized workspace names and indexed state      |
