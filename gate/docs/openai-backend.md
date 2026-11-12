@@ -20,11 +20,23 @@ node dist/src/cli.js import-openai --state .data --id docs \
 Supply each collection/store binding explicitly. The environment variable name is
 stored; its value is read only by the serving process. Provision a project-scoped
 query credential with vector-store search and parsed-content read permissions.
-Original downloads additionally require permission to GET `/v1/files/{file_id}/content`;
-existing credentials are not automatically expanded. A denied download returns
+Original downloads require both provider downloadability for the file and permission
+to GET `/v1/files/{file_id}/content`; permission alone does not guarantee access.
+Existing credentials are not automatically expanded. A denied download returns
 `ORIGINAL_UNAVAILABLE`. That error alone does not establish a permission failure: file-purpose restrictions and availability can also cause rejection. Failed original downloads now include only HTTP status, a request ID matching the bounded `req_` hexadecimal format, and strict allowlisted provider type/code values. An exact provider message denying `assistants` downloads maps to the fixed `purpose_not_downloadable` classification; arbitrary messages are never returned. Diagnostic JSON reads are capped at 8 KiB within the existing request deadline. Malformed/oversized bodies and unknown fields are discarded, not echoed. No automatic retry or credential/purpose substitution occurs.
 
-The ingestion CLI uploads with `purpose="assistants"`. Its reconciliation content-download code and synthetic tests do not establish live download support for that purpose. The [Files content reference](https://developers.openai.com/api/reference/resources/files/methods/content) documents the endpoint without resolving this deployment-specific capability; the [API debugging guidance](https://developers.openai.com/api/reference/overview) explains request IDs. Keep original download acceptance separate from parsed retrieval and mock transport tests. Do not change upload purpose, reindex or expand credentials based only on `ORIGINAL_UNAVAILABLE`.
+The ingestion CLI uploads with `purpose="assistants"`. A live acceptance check on
+2026-11-12 returned HTTP 400, `invalid_request_error` and
+`purpose_not_downloadable` for an existing text file. This confirms a provider
+purpose restriction for that read, not missing permission. Current assistants-purpose
+uploads may therefore reject original downloads; granting Files-read permission
+is not an established fix. Use parsed retrieval or an accessible local source.
+Do not automatically change upload purpose, reindex or expand credentials.
+The [Files content reference](https://developers.openai.com/api/reference/resources/files/methods/content)
+documents the endpoint; the [API debugging guidance](https://developers.openai.com/api/reference/overview)
+explains request IDs. Reconciliation code and synthetic tests do not establish
+live original download support. Keep this acceptance boundary separate from
+successful parsed retrieval.
 Never supply an organization admin key. The CLI does not accept a key value, base
 URL, custom HTTP headers or public write tools. The provider origin is fixed to
 `https://api.openai.com/v1`, with an `OpenAI-Project` header and redirects disabled.
@@ -124,7 +136,8 @@ complete such a provider response. Unsupported parsed shapes fail explicitly wit
 from that provider endpoint, not proof of extraction fidelity to the original file.
 
 `format="original"` uses the official [Files content endpoint](https://developers.openai.com/api/reference/resources/files/methods/content)
-for the immutable manifest's file ID. Callers cannot supply file IDs. Bytes must
+for the immutable manifest's file ID, when the provider permits downloading it.
+Callers cannot supply file IDs. Successfully downloaded bytes must
 match `source.sha256`; mismatch returns `CONTENT_MISMATCH` without content. Partial
 HTTP responses are rejected. Uploaded UTF-8 text is decoded without altering BOM,
 newlines or Unicode; encoding `text` as UTF-8 reproduces the downloaded bytes.
@@ -132,7 +145,7 @@ Native PDFs remain binary. Ranges with original format are rejected. QMD origina
 are unsupported (`UNSUPPORTED_FORMAT`); its parsed reads remain supported.
 
 Both formats retain canonical source provenance. `source.sha256` always identifies
-**uploaded original bytes**, never parsed text or excerpts. Original responses add
+**uploaded original bytes**, never parsed text or excerpts. Successful original responses add
 `sha256`, `byteLength`, `mimeType`, `representation` (`original-text` or
 `original-binary`), `format` and `complete: true`. MIME derives from the published
 preprocessing/kind: native PDF is `application/pdf`, Markdown is UTF-8
@@ -152,7 +165,9 @@ Tests validate bytes through the official native HTTP client and Cloudflare MCP
 handler/result schema, including multi_get. This qualifies the protocol, not a
 particular application's attachment UI. Clients must consume embedded `resource.blob`
 content to save binary files; text-only clients should use parsed format or their
-local file tools. Codex/Claude attachment rendering is not qualified here.
+local file tools. Live binary acceptance remains blocked by the observed original
+download restriction; no live binary read was attempted after the text-file denial.
+Codex/Claude attachment rendering is not qualified here.
 
 Each provider response (JSON envelope for parsed/search, raw bytes for original)
 is bounded to 2 MiB; a get/multi_get logical result is bounded to 4 MiB, including
@@ -168,8 +183,9 @@ body or credential is returned.
 OpenAI `status` counts active imported documents and returns `vectors: null`; it
 does not report live provider health or an authoritative embedding count. QMD keeps
 numeric vector counts. No re-ingestion, chunk/overlap/embedding change, manifest
-migration or grant change is required for this retrieval contract. Operators must
-separately authorize and verify any Files download permission change.
+migration or grant change is required for parsed retrieval. Unavailable originals
+require a separately reviewed provider/source strategy; permission expansion is
+not an automatic remedy.
 
 ## Choosing and measuring retrieval
 
