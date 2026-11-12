@@ -16,11 +16,13 @@ export function assertParameterGuidance(tools: any[]) {
     get: {
       ref: ["8192", "query"],
       fromLine: ["1", "1000000", "default 1"],
-      maxLines: ["1", "200", "default 80"],
+      maxLines: ["1", "200", "omitted", "all"],
+      format: ["parsed", "default", "original"],
     },
     multi_get: {
       refs: ["1", "20", "8192"],
-      maxLines: ["1", "200", "default 80"],
+      maxLines: ["1", "200", "omitted", "all"],
+      format: ["parsed", "default", "original"],
     },
     status: { workspaces: ["20", "80", "omitted"] },
   };
@@ -67,18 +69,12 @@ export function assertParameterGuidance(tools: any[]) {
     get: [
       "query",
       "maxLines 1-200",
-      "default 80",
+      "full",
       "fromLine",
       "one-based",
       "default 1",
     ],
-    multi_get: [
-      "authorized",
-      "1-20",
-      "first line",
-      "maxLines 1-200",
-      "default 80",
-    ],
+    multi_get: ["authorized", "1-20", "first line", "maxLines 1-200", "full"],
     status: ["authorized", "workspaces", "omitted", "all", "20"],
   };
   for (const [name, terms] of Object.entries(essential)) {
@@ -88,6 +84,27 @@ export function assertParameterGuidance(tools: any[]) {
         description.includes(term),
         `${name} tool description missing ${term}`,
       );
+  }
+  for (const name of ["query", "get", "multi_get"]) {
+    const description = tools.find((t) => t.name === name).description;
+    for (const term of [
+      "local",
+      "repository",
+      "relative path",
+      "own tools",
+      "revision differences",
+      "source.sha256 hashes original bytes",
+    ])
+      assert.ok(
+        description.includes(term),
+        `${name} missing local-source guidance ${term}`,
+      );
+  }
+  for (const name of ["get", "multi_get"]) {
+    const properties = tools.find((t) => t.name === name).inputSchema
+      .properties;
+    assert.equal(properties.format.default, "parsed");
+    assert.equal(properties.maxLines.default, undefined);
   }
   const list = tools.find((t) => t.name === "list_workspaces");
   assert.equal(list.inputSchema.properties.limit.maximum, 50);

@@ -1,3 +1,5 @@
+import { toolResult } from "./tool-result.js";
+import { publicError } from "./errors.js";
 import { createServer, type IncomingMessage } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -141,12 +143,9 @@ export async function startServer(
             ),
           abort.signal,
         );
-        return {
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          structuredContent: output,
-        };
+        return toolResult(output);
       } catch (error) {
-        const code = error instanceof GateError ? error.code : "NOT_FOUND";
+        const code = publicError(error);
         return { isError: true, content: [{ type: "text", text: code }] };
       }
     });

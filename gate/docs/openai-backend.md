@@ -20,6 +20,9 @@ node dist/src/cli.js import-openai --state .data --id docs \
 Supply each collection/store binding explicitly. The environment variable name is
 stored; its value is read only by the serving process. Provision a project-scoped
 query credential with vector-store search and parsed-content read permissions.
+Original downloads additionally require permission to GET `/v1/files/{file_id}/content`;
+existing credentials are not automatically expanded. A denied download returns
+`ORIGINAL_UNAVAILABLE` with a fixed permission/availability explanation.
 Never supply an organization admin key. The CLI does not accept a key value, base
 URL, custom HTTP headers or public write tools. The provider origin is fixed to
 `https://api.openai.com/v1`, with an `OpenAI-Project` header and redirects disabled.
@@ -53,18 +56,27 @@ gate path rules. Unsupported producer names/paths are rejected, never normalized
 Strict schema checks reject unknown fields, duplicate JSON keys, malformed IDs,
 inconsistent stores/paths, ambiguous file mappings and unpublished generations.
 SHA-256/version and Git commit syntax are validated; the gate trusts the producer's
-hashes and does not re-fetch source bytes to verify them. Null `source_commit` is valid
+hashes during import and parsed retrieval. Original downloads verify their bytes
+against the published SHA-256 before returning content. Null `source_commit` is valid
 working-tree provenance. Native PDF metadata and per-file preprocessing are retained.
 
 Search requests at most 50 chunks per collection, matching the [provider search
 reference limit](https://developers.openai.com/api/reference/resources/vector_stores/methods/search),
 with no search pagination. Hits
 are filtered by active store/file membership before snippets are returned. Provider
-filenames/attributes cannot override canonical paths or repositories. Repeated chunks
-are collapsed before collection reciprocal-rank ordering (k=60); identical content
+filenames/attributes cannot override canonical paths or repositories. Distinct text
+parts from all accepted hits for a document are grouped into `excerpts` in provider
+order; exact duplicate strings collapse, but overlapping distinct excerpts remain.
+`snippet` is their complete newline-joined compatibility representation, without an
+800-character clip. No source offsets are invented. First appearance determines
+collection reciprocal-rank ordering (k=60); identical content
 in distinct repositories stays distinct. Cross-workspace ranking uses the existing
 gate reciprocal-rank policy. Filtering can underfill results; exhaustive recall is
-not promised. Search chunks supply snippets without fetching every document body.
+not promised. Search chunks supply excerpts without fetching every document body
+or invoking an LLM. The 64 KiB logical query response budget includes both `snippet`
+and `excerpts`; exceeding it returns `CONTENT_TOO_LARGE`, never a clipped result.
+Reduce the result limit or narrow the query/workspace; an individually oversized
+result requires local retrieval. The response states the first-50-chunk limitation.
 
 Modes set OpenAI `ranking_options.hybrid_search` embedding/text weights:
 
@@ -79,19 +91,76 @@ benchmark. The producer qualification accepted all three mappings against a real
 synthetic project on 2026-11-08; this change's deterministic tests validate request
 construction. Live gate qualification is a separate operator-run step.
 
-`get` resolves the exact active file before requesting parsed content. It joins text
-parts with newlines; returned line numbers describe **parsed text**, not original Git
-or PDF lines. Responses with `has_more=true` fail explicitly: the content API's
-continuation request protocol has not been qualified. No partial page is presented as
-a complete document. Each provider response and complete parsed document is bounded
-to 2 MiB, requests to 15 seconds and a workspace retrieval operation to 30 seconds.
-Abort signals propagate through HTTP. Existing tool output and queue limits still
-apply. Provider errors are sanitized, without credentials or response bodies.
+## Document representations
 
-Provenance includes backend, repository/path, known source/repository commits,
-publication ID, uploaded-byte hash, file kind and parsed-line basis. OpenAI `status`
-counts active imported documents and returns `vectors: null`; it does not report live
-provider health or an authoritative embedding count. QMD keeps numeric vector counts.
+`get(ref, format="parsed")` and `multi_get(refs, format="parsed")` default to the
+complete available parsed text. The gate resolves the exact active manifest file
+before requesting `/vector_stores/{store}/files/{file_id}/content`, and joins text
+parts with newlines without guessing about provider overlap. Returned line numbers
+are **parsed text** lines, not original Git or PDF coordinates.
+
+Optional `fromLine` (get only, default 1) and `maxLines` (1-200) preserve explicit
+range reads. Without `maxLines`, all remaining lines are returned. `complete` means
+the whole available parsed document was returned, not merely the requested range;
+`nextLine` is the next parsed line or null at EOF. Starting beyond EOF returns empty
+text, `complete: false`, and `nextLine: null`. A trailing newline counts as an empty
+last line. `multi_get` starts each document at line 1, uses one shared format and
+optional range limit, preserves order and duplicates, and authorizes all references
+before any download. It fails as a whole on any read error or aggregate overflow.
+
+A provider `has_more=true` fails with `INCOMPLETE_CONTENT`: the documented content
+API has no qualified continuation request parameter. A local line range cannot
+complete such a provider response. Unsupported parsed shapes fail explicitly with
+`UNSUPPORTED_CONTENT` and suggest original format or a local source. `complete: true` means the full content available
+from that provider endpoint, not proof of extraction fidelity to the original file.
+
+`format="original"` uses the official [Files content endpoint](https://developers.openai.com/api/reference/resources/files/methods/content)
+for the immutable manifest's file ID. Callers cannot supply file IDs. Bytes must
+match `source.sha256`; mismatch returns `CONTENT_MISMATCH` without content. Partial
+HTTP responses are rejected. Uploaded UTF-8 text is decoded without altering BOM,
+newlines or Unicode; encoding `text` as UTF-8 reproduces the downloaded bytes.
+Native PDFs remain binary. Ranges with original format are rejected. QMD originals
+are unsupported (`UNSUPPORTED_FORMAT`); its parsed reads remain supported.
+
+Both formats retain canonical source provenance. `source.sha256` always identifies
+**uploaded original bytes**, never parsed text or excerpts. Original responses add
+`sha256`, `byteLength`, `mimeType`, `representation` (`original-text` or
+`original-binary`), `format` and `complete: true`. MIME derives from the published
+preprocessing/kind: native PDF is `application/pdf`, Markdown is UTF-8
+`text/markdown`, and other uploaded text is UTF-8 `text/plain`. Original source line
+basis is `original-text` for text and `none` for binary.
+
+Binary originals are standard MCP embedded resources with `{uri, mimeType, blob}`;
+`blob` is base64 and appears exactly once in the tool's `content`. JSON text and
+`structuredContent` contain metadata and the resource URI/MIME, never binary data.
+The URI is the canonical `qgdoc:` reference, not a downloadable public URL or
+credential. The gate does not advertise a separate resources/read endpoint; repeat
+`get` to download again with fresh authorization. Every format retains current-grant,
+token and generation checks before access and before delivery.
+
+The pinned MCP TypeScript SDK 1.32.2 supports this [embedded resource representation](https://github.com/modelcontextprotocol/typescript-sdk/blob/1.32.2/docs/server.md).
+Tests validate bytes through the official native HTTP client and Cloudflare MCP
+handler/result schema, including multi_get. This qualifies the protocol, not a
+particular application's attachment UI. Clients must consume embedded `resource.blob`
+content to save binary files; text-only clients should use parsed format or their
+local file tools. Codex/Claude attachment rendering is not qualified here.
+
+Each provider response (JSON envelope for parsed/search, raw bytes for original)
+is bounded to 2 MiB; a get/multi_get logical result is bounded to 4 MiB, including
+base64 and metadata. MCP text/structured metadata can add serialization overhead,
+so 4 MiB is not a total HTTP wire limit. Larger originals require a local/source
+route; parsed ranges still fetch the complete provider response and cannot bypass
+its 2 MiB bound. Excess size returns `CONTENT_TOO_LARGE` with recovery guidance,
+never a partial document. Provider requests have a 15-second deadline and workspace
+retrieval a 30-second bound; existing queue limits remain. Provider/state errors
+are sanitized; only fixed reviewed explanations are public. No provider error
+body or credential is returned.
+
+OpenAI `status` counts active imported documents and returns `vectors: null`; it
+does not report live provider health or an authoritative embedding count. QMD keeps
+numeric vector counts. No re-ingestion, chunk/overlap/embedding change, manifest
+migration or grant change is required for this retrieval contract. Operators must
+separately authorize and verify any Files download permission change.
 
 ## Choosing and measuring retrieval
 
@@ -111,21 +180,23 @@ required facts are a failed result, not a cost saving.
 
 The current implementation has distinct model-output and provider-work boundaries:
 
-- `src/gateway.ts` clips each query snippet to 800 characters. The provider has
-  already returned the matched chunk; a truncated snippet can require another read.
+- `src/gateway.ts` returns uncut matched excerpts already supplied by the provider;
+  the response budget errors explicitly if the grouped output does not fit.
 - `OpenAIBackend.search` in `src/openai.ts` requests 50 chunks per collection,
-  then deduplicates documents and applies the requested result limit. Reducing
+  then groups document excerpts and applies the requested result limit. Reducing
   `query.limit` reduces returned results, not that provider request bound.
 - `OpenAIBackend.read` fetches a complete parsed document before the gateway
-  slices requested lines. `multi_get` reads documents serially from their starts.
+  optionally slices explicitly requested lines. `multi_get` reads serially from
+  each document start; omitted range limits return full available content.
   Smaller line limits reduce the returned text, not the full-document provider read.
 - `src/http.ts` supplies both MCP text content and structured content. Code-mode
-  callers should display one representation rather than serialize the entire
-  envelope and repeat the same result. This does not change provider work.
+  callers should display one text representation rather than serialize the entire
+  envelope and repeat the same result. Binary resource bytes are emitted once.
+  This does not change provider work.
 
 These are source-level explanations, not measured attribution of elapsed time or
-money. Larger snippets, concurrency and different ranking may help specific cases,
-but require a controlled quality check before changing the shared contract.
+money. This retrieval contract needs controlled quality/efficiency measurement;
+implementation tests alone do not establish a latency or token saving.
 
 Compare complete answers against the practical local route on the same relevant
 source revision, model/effort, tool contract and output budget. Count real inner

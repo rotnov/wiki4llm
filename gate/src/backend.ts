@@ -12,11 +12,18 @@ export interface IndexingStatus {
   error?: string;
   publication_id?: string;
 }
+export type ReadFormat = "parsed" | "original";
 export interface Document {
   collection: string;
   path: string;
   title: string;
   body: string;
+  original?: {
+    mimeType: string;
+    byteLength: number;
+    sha256: string;
+    blob?: string;
+  };
   source?: {
     kind: "openai";
     repository: string;
@@ -26,12 +33,13 @@ export interface Document {
     publicationId: string;
     sha256: string;
     fileKind: string;
-    lineBasis: "parsed-text";
+    lineBasis: "parsed-text" | "original-text" | "none";
     origin?: SourceOrigin;
   };
 }
 export interface Hit extends Document {
   score: number;
+  excerpts?: string[];
 }
 export interface Backend {
   search(
@@ -46,6 +54,7 @@ export interface Backend {
     collection: string,
     path: string,
     signal: AbortSignal,
+    format?: ReadFormat,
   ): Promise<Document | undefined>;
   status(
     workspace: Workspace,

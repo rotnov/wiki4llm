@@ -1,0 +1,390 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { State } from "../src/state.js";
+import { Gateway, encodeReference } from "../src/gateway.js";
+import { OpenAIBackend } from "../src/openai.js";
+import { startServer } from "../src/http.js";
+import { mcp } from "../src/cloudflare/mcp.js";
+const text =
+  "\ufeff" +
+  Array.from({ length: 450 }, (_, i) => `line ${i + 1}`).join("\r\n");
+const pdf = Buffer.from("%PDF-1.7\n\x00\xffbinary\n%%EOF", "latin1");
+const hash = (b: string | Uint8Array) =>
+  createHash("sha256").update(b).digest("hex");
+function setup(
+  t: any,
+  transport?: (url: string, init: RequestInit) => Promise<Response>,
+) {
+  const dir = mkdtempSync(join(tmpdir(), "retrieval-contract-"));
+  const state = new State(dir);
+  t.after(() => {
+    state.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/wiki-rag-manifest.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  manifest.collections.guide.files["README.md"].sha256 = hash(text);
+  manifest.collections.second.files["manual.pdf"].sha256 = hash(pdf);
+  const binding = {
+    projectId: "proj_test",
+    credentialEnv: "SYNTHETIC_QUERY_KEY",
+    stores: { guide: "vs_test", second: "vs_second" },
+  };
+  const w = state.importOpenAI("docs", JSON.stringify(manifest), binding);
+  state.importOpenAI("hidden", JSON.stringify(manifest), binding);
+  state.setPrincipal("reader", { allow: ["docs"], deny: [] });
+  const token = state.issueToken("reader", "test", Date.now() + 60000);
+  const calls: string[] = [];
+  const backend = new OpenAIBackend({
+    env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
+    transport: async (url, init) => {
+      calls.push(url);
+      if (transport) return transport(url, init);
+      if (url.includes("/vector_stores/") && url.endsWith("/content"))
+        return Response.json({
+          data: [{ type: "text", text }],
+          has_more: false,
+        });
+      if (url.endsWith("/files/file-1/content")) return new Response(text);
+      if (url.endsWith("/files/file-4/content"))
+        return new Response(pdf, {
+          headers: { "content-type": "application/pdf" },
+        });
+      return Response.json({
+        data: url.includes("vs_test")
+          ? [
+              "x".repeat(1000) + "answer",
+              "distinct passage",
+              "distinct passage",
+            ].map((s) => ({
+              file_id: "file-1",
+              content: [{ type: "text", text: s }],
+            }))
+          : [],
+        has_more: false,
+      });
+    },
+  });
+  const gateway = new Gateway(state, backend);
+  const ref = encodeReference("docs", w.generation!, "guide", "README.md");
+  const binary = encodeReference("docs", w.generation!, "second", "manual.pdf");
+  return { state, token, gateway, ref, binary, calls, w, manifest, binding };
+}
+test("query preserves long and distinct same-document excerpts in canonical order", async (t) => {
+  const { gateway, token } = setup(t);
+  const r: any = await gateway.execute(token.id, "query", { query: "answer" });
+  assert.equal(r.results.length, 1);
+  assert.equal(
+    r.results[0].snippet,
+    "x".repeat(1000) + "answer\ndistinct passage",
+  );
+  assert.deepEqual(r.results[0].excerpts, [
+    "x".repeat(1000) + "answer",
+    "distinct passage",
+  ]);
+  assert.equal(r.results[0].source.repository, "example/guide");
+});
+test("parsed default and multi_get return complete files; explicit ranges remain bounded", async (t) => {
+  const { gateway, token, ref } = setup(t);
+  const full: any = await gateway.execute(token.id, "get", { ref });
+  assert.equal(full.text, text);
+  assert.equal(full.complete, true);
+  assert.equal(full.totalLines, 450);
+  assert.equal(full.format, "parsed");
+  const range: any = await gateway.execute(token.id, "get", {
+    ref,
+    fromLine: 201,
+    maxLines: 2,
+  });
+  assert.equal(range.text, "line 201\r\nline 202\r");
+  assert.equal(range.complete, false);
+  assert.equal(range.nextLine, 203);
+  const rest: any = await gateway.execute(token.id, "get", {
+    ref,
+    fromLine: 449,
+  });
+  assert.equal(rest.text, "line 449\r\nline 450");
+  assert.equal(rest.nextLine, null);
+  const multi: any = await gateway.execute(token.id, "multi_get", {
+    refs: [ref, ref],
+  });
+  assert.deepEqual(
+    multi.documents.map((d: any) => d.text),
+    [text, text],
+  );
+});
+test("original text is byte-faithful including BOM and CRLF, with checked digest", async (t) => {
+  const { gateway, token, ref, calls } = setup(t);
+  const r: any = await gateway.execute(token.id, "get", {
+    ref,
+    format: "original",
+  });
+  assert.equal(r.text, text);
+  assert.equal(hash(r.text), r.source.sha256);
+  assert.equal(r.complete, true);
+  assert.equal(r.representation, "original-text");
+  assert.equal(r.mimeType, "text/markdown; charset=utf-8");
+  assert.ok(calls[0]?.endsWith("/v1/files/file-1/content"));
+  await assert.rejects(
+    gateway.execute(token.id, "get", { ref, format: "original", maxLines: 2 }),
+    { code: "INVALID_INPUT" },
+  );
+});
+for (const transport of ["native", "worker"] as const)
+  test(`${transport} MCP carries original binary once in a validated embedded resource`, async (t) => {
+    const { state, gateway, token, binary, ref } = setup(t);
+    let call: (args: any) => Promise<any>;
+    if (transport === "native") {
+      const server = await startServer(state, gateway, 0);
+      const client = new Client({ name: "retrieval-contract", version: "1" });
+      t.after(async () => {
+        await client.close();
+        await server.close();
+      });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(server.url), {
+          requestInit: { headers: { Authorization: `Bearer ${token.secret}` } },
+        }),
+      );
+      call = async (args) =>
+        client.callTool({
+          name: args.refs ? "multi_get" : "get",
+          arguments: args,
+        });
+    } else {
+      call = async (args) => {
+        const parsed = {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: args.refs ? "multi_get" : "get", arguments: args },
+        };
+        const r = await mcp(
+          new Request("https://gate.example/mcp", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json, text/event-stream",
+            },
+            body: JSON.stringify(parsed),
+          }),
+          parsed,
+          state,
+          gateway,
+          token.id,
+          new AbortController().signal,
+        );
+        return ((await r.json()) as any).result;
+      };
+    }
+    for (const args of [
+      { ref: binary, format: "original" },
+      { refs: [binary, ref], format: "original" },
+    ]) {
+      const r = CallToolResultSchema.parse(await call(args));
+      assert.equal(r.isError, undefined);
+      const resources = r.content.filter((c) => c.type === "resource");
+      assert.equal(resources.length, 1);
+      const resource: any = resources[0]!.resource;
+      assert.equal(resource.mimeType, "application/pdf");
+      assert.equal(resource.uri, binary);
+      assert.deepEqual(Buffer.from(resource.blob, "base64"), pdf);
+      assert.equal(
+        JSON.stringify(r).split(pdf.toString("base64")).length - 1,
+        1,
+      );
+      assert.ok(!JSON.stringify(r.structuredContent).includes('"blob"'));
+    }
+    state.setPrincipal("reader", { allow: [], deny: [] });
+    const denied = await call({ ref: binary, format: "original" });
+    assert.equal(denied.isError, true);
+    assert.ok(!JSON.stringify(denied).includes(pdf.toString("base64")));
+  });
+test("every format refuses stale, denied, forged and injected file references before access", async (t) => {
+  const { gateway, token, ref, w, calls } = setup(t);
+  for (const format of ["parsed", "original"]) {
+    for (const bad of [
+      encodeReference("hidden", w.generation!, "guide", "README.md"),
+      encodeReference("docs", "stale", "guide", "README.md"),
+    ]) {
+      await assert.rejects(
+        gateway.execute(token.id, "get", { ref: bad, format }),
+      );
+      await assert.rejects(
+        gateway.execute(token.id, "multi_get", { refs: [ref, bad], format }),
+      );
+    }
+    await assert.rejects(
+      gateway.execute(token.id, "get", { ref, format, file_id: "file-stolen" }),
+    );
+  }
+  assert.equal(calls.length, 0);
+});
+test("incomplete parsed content, original integrity failures and size failures are explicit", async (t) => {
+  const partial = setup(t, async () =>
+    Response.json({
+      data: [{ type: "text", text: "partial" }],
+      has_more: true,
+    }),
+  );
+  await assert.rejects(
+    partial.gateway.execute(partial.token.id, "get", { ref: partial.ref }),
+    { code: "INCOMPLETE_CONTENT" },
+  );
+  const mismatch = setup(t, async () => new Response("wrong bytes"));
+  await assert.rejects(
+    mismatch.gateway.execute(mismatch.token.id, "get", {
+      ref: mismatch.ref,
+      format: "original",
+    }),
+    { code: "CONTENT_MISMATCH" },
+  );
+  const huge = setup(
+    t,
+    async () =>
+      new Response("x", {
+        headers: { "content-length": String(2 * 1024 * 1024 + 1) },
+      }),
+  );
+  await assert.rejects(
+    huge.gateway.execute(huge.token.id, "get", { ref: huge.ref }),
+    { code: "CONTENT_TOO_LARGE" },
+  );
+});
+
+test("full parsed reads exceed the former 64 KiB response cap without clipping", async (t) => {
+  const body = Array.from({ length: 450 }, () => "x".repeat(200)).join("\n");
+  const { gateway, token, ref } = setup(t, async () =>
+    Response.json({ data: [{ type: "text", text: body }], has_more: false }),
+  );
+  const r: any = await gateway.execute(token.id, "get", { ref });
+  assert.equal(r.text, body);
+  assert.equal(r.complete, true);
+});
+test("original delivery is blocked by publication, grant and token changes during download", async (t) => {
+  for (const format of ["parsed", "original"])
+    for (const change of ["publication", "grant", "token"]) {
+      let started!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((r) => (started = r)),
+        wait = new Promise<void>((r) => (release = r));
+      const f = setup(t, async () => {
+        started();
+        await wait;
+        return format === "original"
+          ? new Response(pdf)
+          : Response.json({
+              data: [{ type: "text", text: "parsed" }],
+              has_more: false,
+            });
+      });
+      const pending = f.gateway.execute(f.token.id, "get", {
+        ref: f.binary,
+        format,
+      });
+      await entered;
+      if (change === "token") f.state.revokeToken(f.token.id);
+      else if (change === "grant")
+        f.state.setPrincipal("reader", { allow: [], deny: [] });
+      else {
+        f.manifest.generation++;
+        f.manifest.publication_id = "7d0c9d2a-e2ad-45ce-8ff1-c736ffdaf90a";
+        f.state.importOpenAI("docs", JSON.stringify(f.manifest), f.binding);
+      }
+      release();
+      await assert.rejects(pending);
+    }
+});
+test("original partial HTTP content and denied provider downloads fail honestly", async (t) => {
+  for (const [response, code] of [
+    [() => new Response(pdf, { status: 206 }), "INCOMPLETE_CONTENT"],
+    [
+      () =>
+        new Response(pdf, { headers: { "content-range": "bytes 0-23/24" } }),
+      "INCOMPLETE_CONTENT",
+    ],
+    [
+      () => new Response("private provider failure", { status: 403 }),
+      "ORIGINAL_UNAVAILABLE",
+    ],
+  ] as const) {
+    const f = setup(t, async () => response());
+    await assert.rejects(
+      f.gateway.execute(f.token.id, "get", {
+        ref: f.binary,
+        format: "original",
+      }),
+      { code },
+    );
+  }
+});
+test("query overflow is explicit rather than dropping excerpts or returning a clipped answer", async (t) => {
+  const f = setup(t, async () =>
+    Response.json({
+      data: [
+        {
+          file_id: "file-1",
+          content: [{ type: "text", text: "x".repeat(70000) }],
+        },
+      ],
+      has_more: false,
+    }),
+  );
+  await assert.rejects(f.gateway.execute(f.token.id, "query", { query: "x" }), {
+    code: "CONTENT_TOO_LARGE",
+  });
+});
+test("MCP exposes actionable fixed errors without provider bodies", async (t) => {
+  const f = setup(
+    t,
+    async () => new Response("private provider failure", { status: 403 }),
+  );
+  const parsed = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "get", arguments: { ref: f.binary, format: "original" } },
+  };
+  const response = await mcp(
+    new Request("https://gate.example/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(parsed),
+    }),
+    parsed,
+    f.state,
+    f.gateway,
+    f.token.id,
+    new AbortController().signal,
+  );
+  const wire = await response.text();
+  assert.ok(wire.includes("ORIGINAL_UNAVAILABLE"));
+  assert.ok(wire.includes("Files content read permission"));
+  assert.ok(!wire.includes("private provider failure"));
+});
+
+test("unsupported parsed representations return an actionable content error", async (t) => {
+  const f = setup(t, async () =>
+    Response.json({
+      data: [{ type: "image", text: "not parsed text" }],
+      has_more: false,
+    }),
+  );
+  await assert.rejects(f.gateway.execute(f.token.id, "get", { ref: f.ref }), {
+    code: "UNSUPPORTED_CONTENT",
+  });
+});

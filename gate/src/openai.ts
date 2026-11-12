@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type {
   Backend,
   Document,
   Hit,
   SearchMode,
   IndexingStatus,
+  ReadFormat,
 } from "./backend.js";
 import type { Workspace } from "./state-contract.js";
 import type { OpenAISnapshot } from "./manifest.js";
@@ -56,6 +58,7 @@ export class OpenAIBackend implements Backend {
     path: string,
     signal: AbortSignal,
     body?: unknown,
+    original = false,
   ): Promise<unknown> {
     if (signal.aborted) throw new GateError("CANCELLED", "Request cancelled");
     const key = this.env[s.credentialEnv];
@@ -102,11 +105,24 @@ export class OpenAIBackend implements Backend {
           );
           if (!response.ok || response.redirected) {
             await response.body?.cancel();
-            throw new GateError("NOT_FOUND", "OpenAI request failed");
+            throw new GateError(
+              original ? "ORIGINAL_UNAVAILABLE" : "NOT_FOUND",
+              "OpenAI request failed",
+            );
+          }
+          if (
+            original &&
+            (response.status !== 200 || response.headers.has("content-range"))
+          ) {
+            await response.body?.cancel();
+            throw new GateError("INCOMPLETE_CONTENT");
           }
           if (Number(response.headers.get("content-length")) > MAX_RESPONSE) {
             await response.body?.cancel();
-            throw new GateError("NOT_FOUND", "OpenAI response exceeds limit");
+            throw new GateError(
+              "CONTENT_TOO_LARGE",
+              "OpenAI response exceeds limit",
+            );
           }
           if (!response.body)
             throw new GateError("NOT_FOUND", "Invalid OpenAI response");
@@ -120,7 +136,7 @@ export class OpenAIBackend implements Backend {
               size += value.byteLength;
               if (size > MAX_RESPONSE)
                 throw new GateError(
-                  "NOT_FOUND",
+                  "CONTENT_TOO_LARGE",
                   "OpenAI response exceeds limit",
                 );
               chunks.push(value);
@@ -129,10 +145,10 @@ export class OpenAIBackend implements Backend {
             await reader.cancel().catch(() => {});
             reader.releaseLock();
           }
+          const bytes = Buffer.concat(chunks);
+          if (original) return bytes;
           return JSON.parse(
-            new TextDecoder("utf-8", { fatal: true }).decode(
-              Buffer.concat(chunks),
-            ),
+            new TextDecoder("utf-8", { fatal: true }).decode(bytes),
           );
         })(),
       ]);
@@ -209,7 +225,7 @@ export class OpenAIBackend implements Backend {
       const active = new Map(
         Object.entries(c.files).map(([path, f]) => [f.file_id, path]),
       );
-      const seen = new Set<string>();
+      const seen = new Map<string, Hit>();
       let rank = 0;
       for (const item of parsed.data.data) {
         if (!item || typeof item !== "object")
@@ -218,7 +234,6 @@ export class OpenAIBackend implements Backend {
         const path = active.get(String(row.file_id));
         if (
           !path ||
-          seen.has(path) ||
           (row.vector_store_id !== undefined &&
             row.vector_store_id !== c.vector_store_id)
         )
@@ -226,16 +241,20 @@ export class OpenAIBackend implements Backend {
         const content = textParts.safeParse(row.content);
         if (!content.success)
           throw new GateError("NOT_FOUND", "Invalid OpenAI search content");
-        seen.add(path);
-        hits.push({
-          ...this.document(
-            s,
-            name,
-            path,
-            content.data.map((x) => x.text).join("\n"),
-          ),
-          score: 1 / (61 + rank++),
-        });
+        const excerpts = content.data.map((x) => x.text);
+        let hit = seen.get(path);
+        if (!hit) {
+          hit = {
+            ...this.document(s, name, path, ""),
+            score: 1 / (61 + rank++),
+            excerpts: [],
+          };
+          seen.set(path, hit);
+          hits.push(hit);
+        }
+        for (const excerpt of excerpts)
+          if (!hit.excerpts!.includes(excerpt)) hit.excerpts!.push(excerpt);
+        hit.body = hit.excerpts!.join("\n");
       }
     }
     return hits
@@ -252,6 +271,7 @@ export class OpenAIBackend implements Backend {
     collection: string,
     path: string,
     signal: AbortSignal,
+    format: ReadFormat = "parsed",
   ): Promise<Document | undefined> {
     const s = this.snapshot(w);
     if (!Object.hasOwn(s.manifest.collections, collection)) return undefined;
@@ -259,6 +279,43 @@ export class OpenAIBackend implements Backend {
     if (!Object.hasOwn(c.files, path)) return undefined;
     const f = c.files[path]!;
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
+    if (format === "original") {
+      const bytes = (await this.request(
+        s,
+        `/files/${f.file_id}/content`,
+        bounded,
+        undefined,
+        true,
+      )) as Buffer;
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (sha256 !== f.sha256) throw new GateError("CONTENT_MISMATCH");
+      const binary = f.preprocessing === "pdf-native-v1";
+      let body = "";
+      if (!binary) {
+        try {
+          // Preserve the UTF-8 BOM as a character so re-encoding is byte-faithful.
+          body = new TextDecoder("utf-8", {
+            fatal: true,
+            ignoreBOM: true,
+          }).decode(bytes);
+        } catch {
+          throw new GateError("UNSUPPORTED_FORMAT");
+        }
+      }
+      const doc = this.document(s, collection, path, body);
+      doc.source!.lineBasis = binary ? "none" : "original-text";
+      doc.original = {
+        mimeType: binary
+          ? "application/pdf"
+          : f.kind === "md"
+            ? "text/markdown; charset=utf-8"
+            : "text/plain; charset=utf-8",
+        byteLength: bytes.length,
+        sha256,
+        ...(binary ? { blob: bytes.toString("base64") } : {}),
+      };
+      return doc;
+    }
     const raw = await this.request(
       s,
       `/vector_stores/${c.vector_store_id}/files/${f.file_id}/content`,
@@ -266,20 +323,26 @@ export class OpenAIBackend implements Backend {
     );
     const parsed = page.safeParse(raw);
     if (!parsed.success)
-      throw new GateError("NOT_FOUND", "Invalid parsed content response");
+      throw new GateError(
+        "UNSUPPORTED_CONTENT",
+        "Invalid parsed content response",
+      );
     // The published content API does not specify a continuation request parameter.
     // Refuse partial documents until that protocol is qualified against the provider.
     if (parsed.data.has_more)
       throw new GateError(
-        "NOT_FOUND",
+        "INCOMPLETE_CONTENT",
         "Parsed content pagination is not supported",
       );
     const content = textParts.safeParse(parsed.data.data);
     if (!content.success)
-      throw new GateError("NOT_FOUND", "Invalid parsed content response");
+      throw new GateError(
+        "UNSUPPORTED_CONTENT",
+        "Invalid parsed content response",
+      );
     const body = content.data.map((p) => p.text).join("\n");
     if (Buffer.byteLength(body) > MAX_RESPONSE)
-      throw new GateError("NOT_FOUND", "Parsed content exceeds limit");
+      throw new GateError("CONTENT_TOO_LARGE", "Parsed content exceeds limit");
     return this.document(s, collection, path, body);
   }
   async status(

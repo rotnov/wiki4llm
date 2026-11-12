@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { StateReader, Workspace } from "./state-contract.js";
-import type { Backend, Document } from "./backend.js";
+import type { Backend, Document, ReadFormat } from "./backend.js";
 import { resolveSelection, validateSlug } from "./policy.js";
 import { GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
@@ -17,7 +17,10 @@ const parameterDescriptions = {
   queryLimit: "limit: integer 1-20, default 10 results.",
   ref: "ref: exact document reference returned by query, at most 8192 characters.",
   fromLine: "fromLine: integer 1-1000000, default 1; one-based starting line.",
-  maxLines: "maxLines: integer 1-200, default 80 lines per document.",
+  maxLines:
+    "maxLines: optional integer 1-200; omitted returns all remaining parsed lines.",
+  format:
+    "format: parsed (default) returns complete available parsed text; original returns verified uploaded bytes. Ranges apply only to parsed.",
   refs: "refs: 1-20 exact document references returned by query, each at most 8192 characters.",
 };
 const selectors = z
@@ -72,24 +75,32 @@ export const toolSchemas = {
         .string()
         .max(MAX_REFERENCE_LENGTH)
         .describe(parameterDescriptions.ref),
+      format: z
+        .enum(["parsed", "original"])
+        .default("parsed")
+        .describe(parameterDescriptions.format),
       fromLine: z
         .number()
         .int()
         .min(1)
         .max(1000000)
-        .default(1)
+        .optional()
         .describe(parameterDescriptions.fromLine),
       maxLines: z
         .number()
         .int()
         .min(1)
         .max(200)
-        .default(80)
+        .optional()
         .describe(parameterDescriptions.maxLines),
     })
     .strict(),
   multi_get: z
     .object({
+      format: z
+        .enum(["parsed", "original"])
+        .default("parsed")
+        .describe(parameterDescriptions.format),
       refs: z
         .array(z.string().max(MAX_REFERENCE_LENGTH))
         .min(1)
@@ -100,7 +111,7 @@ export const toolSchemas = {
         .int()
         .min(1)
         .max(200)
-        .default(80)
+        .optional()
         .describe(parameterDescriptions.maxLines),
     })
     .strict(),
@@ -110,10 +121,10 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   list_workspaces:
     "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
   query:
-    "Search authorized workspaces. limit 1-20 (default 10). workspaces: names or masks; omitted means all authorized workspaces, at most 20; empty selection rejected. mode: lex, vec or hybrid (default hybrid); QMD lex is model-free, OpenAI modes weight text/embeddings.",
-  get: "Read an exact reference from query. maxLines 1-200 (default 80); fromLine is one-based (default 1).",
+    "Search authorized workspaces for full matched excerpts. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer a matching local checkout via source.repository + relative path; read with your own tools. Report revision differences; get if local source/tools unavailable. source.sha256 hashes original bytes, not excerpts.",
+  get: "Read query ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
   multi_get:
-    "Read 1-20 exact authorized references from query, starting at the first line. maxLines 1-200 (default 80 per document).",
+    "Read 1-20 authorized query refs. format parsed (default): full text from first line; optional maxLines 1-200. original: verified bytes (binary MCP resources), no ranges. Prefer accessible local repository + relative path with your own tools; report revision differences. Use get/multi_get if local source/tools unavailable. source.sha256 hashes original bytes, not excerpts.",
   status:
     "Get document counts and background indexing status. workspaces: authorized names or masks; omitted means all authorized workspaces, at most 20; empty selection rejected.",
 };
@@ -237,18 +248,62 @@ export class Gateway {
       w: Workspace,
       ref: Reference,
       fromLine: number,
-      maxLines: number,
+      maxLines: number | undefined,
+      format: ReadFormat,
     ) => {
       cancelled(signal);
-      const doc = await this.backend.read(w, ref.collection, ref.path, signal);
+      if (format === "original" && w.backend !== "openai")
+        throw new GateError("UNSUPPORTED_FORMAT");
+      const doc = await this.backend.read(
+        w,
+        ref.collection,
+        ref.path,
+        signal,
+        format,
+      );
       if (!doc || doc.collection !== ref.collection || doc.path !== ref.path)
         throw new GateError("NOT_FOUND", "Document unavailable");
+      if (format === "original") {
+        if (!doc.original) throw new GateError("UNSUPPORTED_FORMAT");
+        const { blob, ...metadata } = doc.original;
+        return {
+          ...describe(w, doc),
+          format,
+          complete: true,
+          ...metadata,
+          representation:
+            blob === undefined ? "original-text" : "original-binary",
+          ...(blob === undefined
+            ? { text: doc.body }
+            : {
+                resource: {
+                  uri: encodeReference(
+                    w.id,
+                    w.generation!,
+                    doc.collection,
+                    doc.path,
+                  ),
+                  mimeType: metadata.mimeType,
+                  blob,
+                },
+              }),
+        };
+      }
       const lines = doc.body.split("\n");
+      const end =
+        maxLines === undefined
+          ? lines.length
+          : Math.min(lines.length, fromLine - 1 + maxLines);
       return {
         ...describe(w, doc),
+        format,
+        representation: "parsed-text",
+        mimeType: "text/plain; charset=utf-8",
         fromLine,
         totalLines: lines.length,
-        text: lines.slice(fromLine - 1, fromLine - 1 + maxLines).join("\n"),
+        complete: fromLine === 1 && end >= lines.length,
+        nextLine: end < lines.length ? end + 1 : null,
+        text: lines.slice(fromLine - 1, end).join("\n"),
       };
     };
     let result: Record<string, unknown>;
@@ -290,7 +345,8 @@ export class Gateway {
               hits.push({
                 ...describe(w, hit),
                 score: 1 / (61 + rank),
-                snippet: hit.body.slice(0, 800),
+                snippet: hit.body,
+                ...(hit.excerpts ? { excerpts: hit.excerpts } : {}),
               });
           }
           hits.sort(
@@ -307,7 +363,7 @@ export class Gateway {
               ? {
                   retrieval: {
                     openai:
-                      "First 50 chunks per collection; active documents deduplicated before collection reciprocal rank (k=60). No search pagination; results may be incomplete. Modes control OpenAI embedding/text weights, not QMD-equivalent ranking.",
+                      "First 50 chunks per collection; distinct excerpts grouped by active document before collection reciprocal rank (k=60). No search pagination; results may be incomplete. Excerpts are uncut provider text without source offsets; response budget failures return an error, never truncated passages. Modes control OpenAI embedding/text weights, not QMD-equivalent ranking.",
                   },
                 }
               : {}),
@@ -318,16 +374,25 @@ export class Gateway {
           const a = parse(toolSchemas.get, args),
             ref = parseReference(a.ref),
             w = resolveRef(ref);
-          result = await read(w, ref, a.fromLine, a.maxLines);
+          if (
+            a.format === "original" &&
+            (a.fromLine !== undefined || a.maxLines !== undefined)
+          )
+            invalid("Ranges require parsed format");
+          result = await read(w, ref, a.fromLine ?? 1, a.maxLines, a.format);
           break;
         }
         case "multi_get": {
           const a = parse(toolSchemas.multi_get, args),
             refs = a.refs.map(parseReference),
             workspaces = refs.map(resolveRef);
+          if (a.format === "original" && a.maxLines !== undefined)
+            invalid("Ranges require parsed format");
           const documents = [];
           for (let i = 0; i < refs.length; i++)
-            documents.push(await read(workspaces[i]!, refs[i]!, 1, a.maxLines));
+            documents.push(
+              await read(workspaces[i]!, refs[i]!, 1, a.maxLines, a.format),
+            );
           result = { documents };
           break;
         }
@@ -362,8 +427,10 @@ export class Gateway {
       if (this.state.workspace(id).generation !== w.generation)
         throw new GateError("CONFLICT", "Index changed; repeat the query");
     }
-    if (Buffer.byteLength(JSON.stringify(result)) > 65536)
-      invalid("Response exceeds 64 KiB; request fewer documents or lines");
+    const maxOutput =
+      tool === "get" || tool === "multi_get" ? 4 * 1024 * 1024 : 65536;
+    if (Buffer.byteLength(JSON.stringify(result)) > maxOutput)
+      throw new GateError("CONTENT_TOO_LARGE");
     return result;
   }
 }

@@ -183,13 +183,13 @@ test("oversized document output and unreviewed methods are rejected", () =>
       collection: "docs",
       path: "readme.md",
       title: "Huge",
-      body: "x".repeat(70000),
+      body: "x".repeat(4 * 1024 * 1024 + 1),
     });
     await assert.rejects(
       g.execute(t, "get", {
         ref: encodeReference("amplifier", "generation-1", "docs", "readme.md"),
       }),
-      { code: "INVALID_INPUT" },
+      { code: "CONTENT_TOO_LARGE" },
     );
     await assert.rejects(g.execute(t, "admin.issue_token", {}), {
       code: "INVALID_INPUT",

@@ -1,3 +1,5 @@
+import { toolResult } from "../tool-result.js";
+import { publicError } from "../errors.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -67,17 +69,14 @@ export async function mcp(
         req.params.arguments ?? {},
         signal,
       );
-      return {
-        content: [{ type: "text", text: JSON.stringify(output) }],
-        structuredContent: output,
-      };
+      return toolResult(output);
     } catch (error) {
       return {
         isError: true,
         content: [
           {
             type: "text",
-            text: error instanceof GateError ? error.code : "NOT_FOUND",
+            text: publicError(error),
           },
         ],
       };
