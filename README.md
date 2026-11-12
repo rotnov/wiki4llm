@@ -7,6 +7,7 @@ MCP gateway, and a reusable GitHub Actions workflow in one repository.
 - **[Connect a repository](docs/github-actions.md)** — workflow inputs and optional GitHub token.
 - **[Operate the gate](gate/README.md)** — Cloudflare or native Node/QMD runtime.
 - **[Develop and verify](docs/development.md)** — local checks and public release process.
+- **[Choose a retrieval route](gate/docs/openai-backend.md#choosing-and-measuring-retrieval)** — local and remote evidence, work bounds and honest cost measurement.
 - **[Operator skill](skills/wiki4llm/SKILL.md)** — deployment, access,
   OAuth clients, ingestion and recovery procedures for agents.
 - **[Public explainer](site/index.html)** — purpose and principles; [site maintenance](docs/public-site.md).

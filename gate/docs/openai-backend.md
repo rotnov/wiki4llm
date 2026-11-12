@@ -93,6 +93,71 @@ publication ID, uploaded-byte hash, file kind and parsed-line basis. OpenAI `sta
 counts active imported documents and returns `vectors: null`; it does not report live
 provider health or an authoritative embedding count. QMD keeps numeric vector counts.
 
+## Choosing and measuring retrieval
+
+A remote index is useful when the source checkout is unavailable or the question
+spans repositories. An available local checkout can answer source and documentation
+questions directly; remote-first is not an inherent cost or latency advantage.
+Use project policy to choose the route. Check source revisions when the distinction
+matters, and avoid repeating the same evidence through remote and local reads
+unless a specific uncertainty requires it.
+
+For remote retrieval, select the required workspaces explicitly. Use the smallest
+result set that covers the question, and fetch only missing context with exact
+returned references. `lex` is a built-in alternative for keyword-heavy questions,
+but its OpenAI weights do not promise literal matching or equal answer quality.
+A fixed query budget can reduce calls while losing necessary evidence; missing
+required facts are a failed result, not a cost saving.
+
+The current implementation has distinct model-output and provider-work boundaries:
+
+- `src/gateway.ts` clips each query snippet to 800 characters. The provider has
+  already returned the matched chunk; a truncated snippet can require another read.
+- `OpenAIBackend.search` in `src/openai.ts` requests 50 chunks per collection,
+  then deduplicates documents and applies the requested result limit. Reducing
+  `query.limit` reduces returned results, not that provider request bound.
+- `OpenAIBackend.read` fetches a complete parsed document before the gateway
+  slices requested lines. `multi_get` reads documents serially from their starts.
+  Smaller line limits reduce the returned text, not the full-document provider read.
+- `src/http.ts` supplies both MCP text content and structured content. Code-mode
+  callers should display one representation rather than serialize the entire
+  envelope and repeat the same result. This does not change provider work.
+
+These are source-level explanations, not measured attribution of elapsed time or
+money. Larger snippets, concurrency and different ranking may help specific cases,
+but require a controlled quality check before changing the shared contract.
+
+Compare complete answers against the practical local route on the same relevant
+source revision, model/effort, tool contract and output budget. Count real inner
+tool invocations, retries and follow-up reads; grade required evidence and
+correctness independently of timings. Record total input, cached input and output
+separately. Fewer bytes, calls or uncached tokens alone do not establish lower
+monetary cost; attributable runtime and provider charges are required. Preserve
+unavailable measurements and corpus mismatches as limitations.
+
+### Lessons from other retrieval systems
+
+Primary-source review on 2026-11-12 found useful patterns, not a replacement
+backend or a demonstrated saving. Context7's public
+[MCP adapter](https://github.com/upstash/context7/blob/681554c5d3a688c67879d02d4f01d79ffd15df13/README.md)
+does not include its hosted parser, crawler or search backend. Its
+[one-request Search API](https://context7.com/docs/api-reference/search/search-documentation-in-one-request)
+combines library selection, retrieval and global reranking. Its separate
+[context API](https://context7.com/docs/api-reference/context/get-documentation-context)
+can skip LLM reranking with `fast=true`, with an explicit relevance tradeoff.
+These are Context7 service features, not options on this gate's OpenAI adapter.
+Requested documentation versions can also fall back; check the served-version
+metadata rather than assuming a requested version proves exact-source currency.
+
+[Obsidian Search](https://github.com/obsidianmd/obsidian-help/blob/8310cf215a732cb9ec76f18e1691401c7c780b30/en/Plugins/Search.md)
+supports path, property and line/block/section scoping. Its native
+[CLI](https://obsidian.md/help/cli) can return matching-line context from a vault,
+but requires the installed application and registered CLI. These mechanisms
+support the value of precise scope and useful match context; they are not this
+gate's query grammar. No Obsidian integration or alternate index is installed by
+this guidance. Evaluate built-in provider controls before adding a parser,
+reranker, cache or new service, and preserve authorization and provenance.
+
 ## Verification and opt-in synthetic driver
 
 `npm test` includes the official MCP SDK against a real local HTTP listener, fake
