@@ -306,6 +306,15 @@ export class Gateway {
         text: lines.slice(fromLine - 1, end).join("\n"),
       };
     };
+    const validateDelivery = () => {
+      cancelled(signal);
+      const current = this.state.context(tokenId);
+      for (const [id, w] of selected) {
+        if (!current.allowed.includes(id)) denied();
+        if (this.state.workspace(id).generation !== w.generation)
+          throw new GateError("CONFLICT", "Index changed; repeat the query");
+      }
+    };
     let result: Record<string, unknown>;
     try {
       switch (tool) {
@@ -416,16 +425,11 @@ export class Gateway {
           invalid("Unsupported tool");
       }
     } catch (error) {
+      validateDelivery();
       if (error instanceof GateError) throw error;
       throw new GateError("NOT_FOUND", "Workspace data unavailable");
     }
-    cancelled(signal);
-    const current = this.state.context(tokenId);
-    for (const [id, w] of selected) {
-      if (!current.allowed.includes(id)) denied();
-      if (this.state.workspace(id).generation !== w.generation)
-        throw new GateError("CONFLICT", "Index changed; repeat the query");
-    }
+    validateDelivery();
     const maxOutput =
       tool === "get" || tool === "multi_get" ? 4 * 1024 * 1024 : 65536;
     if (Buffer.byteLength(JSON.stringify(result)) > maxOutput)

@@ -635,3 +635,68 @@ test("many same-document provider hits keep discovery within budget at limit thr
   assert.ok(Buffer.byteLength(JSON.stringify(result)) < 65536);
   assert.equal(f.calls.length, 2);
 });
+
+test("native failed original downloads recheck authority before releasing diagnostics", async (t) => {
+  for (const change of ["token", "grant", "publication", "none"] as const)
+    await t.test(change, async (t) => {
+      const requestId = "req_0123456789abcdef0123456789abcdef";
+      const f = setup(t, async () => {
+        if (change === "token") f.state.revokeToken(f.token.id);
+        else if (change === "grant")
+          f.state.setPrincipal("reader", { allow: [], deny: [] });
+        else if (change === "publication") {
+          f.manifest.generation++;
+          f.manifest.publication_id = "7d0c9d2a-e2ad-45ce-8ff1-c736ffdaf90a";
+          f.state.importOpenAI("docs", JSON.stringify(f.manifest), f.binding);
+        }
+        return Response.json(
+          {
+            error: {
+              type: "invalid_request_error",
+              code: "permission_denied",
+              message: "private body",
+            },
+          },
+          { status: 403, headers: { "x-request-id": requestId } },
+        );
+      });
+      const server = await startServer(f.state, f.gateway, 0);
+      const client = new Client({
+        name: "original-failure-authority",
+        version: "1",
+      });
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(server.url), {
+            requestInit: {
+              headers: { Authorization: `Bearer ${f.token.secret}` },
+            },
+          }),
+        );
+        const result = CallToolResultSchema.parse(
+          await client.callTool({
+            name: "get",
+            arguments: { ref: f.ref, format: "original" },
+          }),
+        );
+        assert.equal(result.isError, true);
+        if (change === "none") {
+          const wire = JSON.stringify(result);
+          assert.ok(wire.includes("ORIGINAL_UNAVAILABLE"));
+          assert.ok(wire.includes(requestId));
+          assert.ok(wire.includes("permission_denied"));
+        } else {
+          const expected = {
+            token: "UNAUTHENTICATED",
+            grant: "ACCESS_DENIED",
+            publication: "CONFLICT",
+          }[change];
+          assert.deepEqual(result.content, [{ type: "text", text: expected }]);
+          assert.equal(result.structuredContent, undefined);
+        }
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+});
