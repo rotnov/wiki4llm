@@ -105,23 +105,6 @@ def setup_batch(tmp_path, repo, count=1):
     return cfg, AsyncAuthority(cfg), BatchProvider()
 
 
-def test_terminal_recovery_logs_source_size_and_keeps_attempt_bound(
-    tmp_path, repo, monkeypatch, capsys
-):
-    cfg, authority, provider = setup_batch(tmp_path, repo)
-    invoke(cfg, authority, provider, monkeypatch)
-    oid, op = next(iter(authority.ops.items()))
-    op.update(phase="ingestion_failed", terminal_failure=True, ingestion_attempts=3)
-    with pytest.raises(RagError, match="retry limit"):
-        invoke(cfg, authority, provider, monkeypatch)
-    text = capsys.readouterr().err
-    assert '"event": "terminal_recovery_candidate"' in text
-    assert f'"operation_id": "{oid}"' in text
-    assert '"source_bytes":' in text
-    assert '"ingestion_attempts": 3' in text
-    assert provider.uploads == 1
-
-
 def invoke(cfg, authority, provider, monkeypatch, command="index"):
     with backend(cfg, authority, monkeypatch) as remote:
         return run(cfg, command, apply=True, provider=provider, remote=remote)

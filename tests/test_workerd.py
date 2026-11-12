@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 from conftest import git, tracked
+from test_bulk_terminal_recovery import RecoveryProvider
 from test_engine import FakeProvider
 from test_remote import remote_config
 
@@ -445,17 +446,34 @@ def test_real_workerd_background_failure_preserves_prior_and_recovers(tmp_path, 
     git(repo, "commit", "-m", "first")
     cfg = remote_config(tmp_path, repo)
     provision(bridge, cfg)
-    provider = FakeProvider()
+    provider = RecoveryProvider()
+    attach = provider.attach_batch
+
+    def complete_batch(store, items, chunking):
+        result = attach(store, items, chunking)
+        for item in items:
+            provider.attachments[store, item["file_id"]]["status"] = "completed"
+        return result
+
+    provider.attach_batch = complete_batch
     with RemoteState(cfg, transport=bridge) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
     bridge.complete(provider)
     with RemoteState(cfg, transport=bridge) as remote:
         prior = remote.publication()
     tracked(repo, "a.md", "second")
+    tracked(repo, "b.md", "second b")
+    tracked(repo, "c.md", "second c")
     git(repo, "commit", "-m", "second")
     with RemoteState(cfg, transport=bridge) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
-    provider.attachments["vs_test", "file-2"]["status"] = "failed"
+    for fid in ("file-2", "file-3", "file-4"):
+        provider.attachments["vs_test", fid].update(
+            status="failed",
+            attributes={},
+            usage_bytes=0,
+            last_error={"code": "server_error", "message": "synthetic internal error"},
+        )
     assert bridge.tick(provider)[0]["status"] == "failed"
     with RemoteState(cfg, transport=bridge) as remote:
         assert remote.publication() == prior
@@ -466,7 +484,7 @@ def test_real_workerd_background_failure_preserves_prior_and_recovers(tmp_path, 
     with RemoteState(cfg, transport=bridge) as remote:
         run(cfg, "index", apply=True, provider=provider, remote=remote)
         assert remote.publication() != prior
-    assert provider.uploads == 3 and set(provider.files) == {"file-3"}
+    assert provider.uploads == 7 and set(provider.files) == {"file-5", "file-6", "file-7"}
 
 
 def test_real_workerd_mixed_derived_origins_are_immutable_and_background_verified(

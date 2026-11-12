@@ -423,6 +423,8 @@ def test_real_checkout_and_engine_git_are_literal_and_credential_scoped(
 
     def engine(cfg, command, **kwargs):
         assert command == "index" and kwargs["apply"] is True
+        # Recovery logging retains redaction inputs after source env isolation.
+        assert set(credentials.values()) <= set(kwargs["provider"].diagnostic_sensitive)
         assert cfg.remote_state.workspace == "team-docs"
         assert cfg.collections[0].binding()["repository"] == "example/source0"
         snap = scan(cfg)

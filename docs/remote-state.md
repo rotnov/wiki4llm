@@ -88,6 +88,39 @@ shape and terminal-recovery boundary. A later publisher logs selected source byt
 and the existing attempt count for that operation; source and vector-store sizes
 measure different things. No provider prose is included in these job diagnostics.
 
+Ordinary remote sync performs a terminal-recovery preflight only when a selected
+operation is already `ingestion_failed`, or has a terminal failure with interrupted
+retirement intent. It first scans every configured store using the bounded GET-only
+diagnostic adapter. Each sanitized failure is immediately logged with its opaque
+File ID, followed by a separate `terminal_diagnostic_scan_complete` event only after
+all stores finish. A malformed later page preserves earlier private log receipts
+but authorizes no recovery checkpoints or provider writes.
+
+The preflight correlates only selected acknowledged uploads in `attached` or
+`ingestion_failed`. Every existing `ingestion_failed` record must pass fresh proof;
+it cannot be skipped if now completed, in progress, missing or conflicting. Automatic
+replacement is limited to observed `server_error` failures. Unknown or other reasons
+remain intact for investigation; unowned files are logged but never adopted. Proof
+checks selected source hash and immutable receipt fields, File ID, unique filename,
+size and purpose, exact store and configured chunking, plus exact or empty/absent
+attributes. It rereads the attachment after inspecting the immutable File. The
+authority lease fences protocol writers, not arbitrary external provider edits;
+GET and DELETE are not atomic.
+
+All proofs and attempt budgets must pass before any recovery checkpoint. Proven
+failures are marked through the existing protocol in batches of at most 100, also
+subject to its byte bound. Every marker batch must succeed before the first delete.
+A later batch failure may leave earlier durable markers; the next sync re-proves
+them all. Recovery then uses the existing retirement/replacement loop, retaining
+retired receipts and the maximum of three ingestion attempts. Interrupted
+`detach_pending`, `detached`, `file_delete_pending` and `deleted` terminal intents
+resume their exact owned retirement without requiring an attachment that may already
+be gone, and without resetting the attempt budget. Normal non-terminal retirement,
+initial healthy submission, unchanged no-op identity and read-only preview keep
+their existing behavior. Implementation routes are
+`remote_batch.stage_files`, `remote_recovery.prove_terminal_recovery`,
+`provider.attachment_failures`, `remote_state.checkpoint_many` and `engine.retire`.
+
 After attachment submission and a matching rescan, `submit` durably captures the
 exact manifest. The CLI returns `mode: submitted` and `job_id`, without waiting for
 OpenAI indexing. A Durable Object alarm verifies readiness and atomically publishes

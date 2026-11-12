@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .config import RagError
 from .engine import retire
 from .provider import RejectedWrite
+from .remote_recovery import prove_terminal_recovery
 from .remote_state import encode
 from .selection import stable_hash
 
@@ -49,6 +50,7 @@ def stage_files(cfg, state, selected, provider):
     ops = {}
     for offset in range(0, len(rows), 50):
         ops.update(remote.lookup([r[0] for r in rows[offset : offset + 50]]))
+    eligible = prove_terminal_recovery(cfg, remote, rows, ops, provider, attributes)
 
     def checkpoint(ids, retired=()):
         remote.checkpoint_many([{"id": oid, "operation": ops[oid]} for oid in ids], retired)
@@ -89,6 +91,8 @@ def stage_files(cfg, state, selected, provider):
                     "file_delete_pending",
                     "deleted",
                 }:
+                    if op["phase"] == "ingestion_failed" and oid not in eligible:
+                        raise RagError("terminal recovery lacks fresh eligibility proof")
                     retire(cfg, state, oid, op, provider)
                     retired.append({"id": oid, "retired_id": f"{oid}.retired.{uuid.uuid4().hex}"})
                     op = None

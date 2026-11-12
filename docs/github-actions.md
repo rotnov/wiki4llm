@@ -193,6 +193,16 @@ a writer lease or mutate journal rows just to diagnose; leave unresolved or unow
 records explicitly unresolved. Keep failed attachments intact until their actual
 provider message and source/journal correlation have been preserved.
 
+Ordinary authorized `sync` also captures these private diagnostic records before
+recovering a selected durable terminal failure. Unlike standalone `diagnose`, this
+path streams each observed failure to stderr and emits a separate scan-complete
+event after every configured store finishes. Partial logs survive a later scan
+error but authorize no recovery writes. The wrapper preserves the same additional
+credential-redaction inputs before clearing the source-checkout environment.
+Sync then proves ownership and eligibility for every recovery candidate and uses
+the existing bounded replacement protocol; see [terminal recovery](remote-state.md).
+This does not change caller mode choices or authorize a diagnostic-only sync run.
+
 Workflow outputs:
 
 - `workspace`: selected workspace slug.

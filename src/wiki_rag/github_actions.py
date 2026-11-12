@@ -412,6 +412,8 @@ def execute(
         remote = remote_factory(cfg)  # Capture only headers; constructor makes no requests.
         if mode == "sync":
             provider = provider_factory(cfg)
+            # Capture before git_environment removes the wrapper credentials.
+            provider.diagnostic_sensitive = tuple(os.environ.get(name, "") for name in INPUT_ENV)
     except BaseException:
         finish_clients(remote, provider, None, True)
         raise

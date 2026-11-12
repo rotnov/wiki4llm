@@ -172,7 +172,7 @@ class OpenAIProvider:
             raise RagError("invalid provider file list")
         return not data["data"] and data.get("has_more") is False
 
-    def attachment_failures(self, store, *, sensitive=()):
+    def attachment_failures(self, store, *, sensitive=(), on_failure=None):
         """GET-only terminal failure receipt; store presence is not ownership proof."""
         store = identifier(store, "vs_")
         failures, seen, after, scanned = [], set(), None, 0
@@ -249,6 +249,8 @@ class OpenAIProvider:
                 )
                 if len(failures) > 10000:
                     raise RagError("provider diagnosis failure receipt limit reached")
+                if on_failure is not None:
+                    on_failure(failures[-1])
             if not page["has_more"]:
                 return {"scanned_files": scanned, "failures": failures}
             if last is None or page.get("last_id") != last:
