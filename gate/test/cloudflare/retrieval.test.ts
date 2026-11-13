@@ -50,6 +50,7 @@ test("workerd verifies original hashes and emits exact PDF resources without nat
     })
   ).outputFiles[0]!.text;
   const calls: string[] = [];
+  let overflow: "provider_response" | "tool_response" | undefined;
   const mf = new Miniflare({
     modules: true,
     script,
@@ -60,6 +61,25 @@ test("workerd verifies original hashes and emits exact PDF resources without nat
       calls.push(req.url);
       assert.equal(req.headers.get("authorization"), "Bearer sk-fixture00");
       assert.equal(req.headers.get("openai-project"), "proj_test");
+      if (overflow)
+        return new MFResponse(
+          JSON.stringify({
+            data: [
+              {
+                file_id: "file-1",
+                content: [
+                  {
+                    type: "text",
+                    text: "private-body-marker ".repeat(
+                      overflow === "provider_response" ? 110000 : 4000,
+                    ),
+                  },
+                ],
+              },
+            ],
+            has_more: false,
+          }),
+        );
       return req.url.endsWith("/file-4/content")
         ? new MFResponse(pdf)
         : new MFResponse(text);
@@ -118,6 +138,44 @@ test("workerd verifies original hashes and emits exact PDF resources without nat
     assert.ok(
       calls.every((url) => url.startsWith("https://api.openai.com/v1/files/")),
     );
+    for (const stage of ["provider_response", "tool_response"] as const) {
+      overflow = stage;
+      const response = await mf.dispatchFetch("https://gate.example/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "query", arguments: { query: "x" } },
+        }),
+      });
+      const result = CallToolResultSchema.parse(
+        ((await response.json()) as any).result,
+      );
+      assert.equal(result.isError, true);
+      assert.equal(result.structuredContent, undefined);
+      assert.equal(result.content.length, 1);
+      const content = result.content[0]!;
+      assert.ok(content.type === "text");
+      assert.match(content.text, /^CONTENT_TOO_LARGE:/);
+      assert.ok(content.text.includes(" Diagnostics: "));
+      assert.deepEqual(JSON.parse(content.text.split(" Diagnostics: ")[1]!), {
+        stage,
+        limitBytes: stage === "provider_response" ? 2097152 : 65536,
+      });
+      for (const secret of [
+        "private-body-marker",
+        "file-1",
+        "proj_test",
+        "sk-fixture00",
+        "README.md",
+      ])
+        assert.ok(!JSON.stringify(result).includes(secret));
+    }
   } finally {
     await mf.dispose();
   }

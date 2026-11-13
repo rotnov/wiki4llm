@@ -232,7 +232,16 @@ base64 and metadata. MCP text encoding and resource metadata can add serializati
 so 4 MiB is not a total HTTP wire limit. Larger originals require a local/source
 route; parsed ranges still fetch the complete provider response and cannot bypass
 its 2 MiB bound. Excess size returns `CONTENT_TOO_LARGE` with recovery guidance,
-never a partial document. Provider requests have a 15-second deadline and workspace
+never a partial document. Its single-text MCP error includes only a fixed explanation
+and `Diagnostics: {"stage":"...","limitBytes":...}`. The stages identify local gate
+limits: `provider_response` (2097152 bytes, HTTP header or streamed body),
+`parsed_content` (2097152 bytes, joined parsed text), or `tool_response`
+(65536 bytes for non-read tools; 4194304 bytes for reads). These are not provider
+service rejections. Reducing `query.limit` changes the final result budget, not the
+provider search's 50-result bound. Parsed line ranges cannot bypass the provider
+or full parsed-text checks. Diagnostics exclude bodies, paths, identifiers,
+observed sizes and headers. Errors recorded without attribution cannot establish
+which boundary failed. Provider requests have a 15-second deadline and workspace
 retrieval a 30-second bound; existing queue limits remain. Provider/state errors
 are sanitized; only fixed reviewed explanations are public. No provider error
 body or credential is returned.

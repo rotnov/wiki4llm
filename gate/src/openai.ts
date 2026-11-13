@@ -12,8 +12,12 @@ import type {
 } from "./backend.js";
 import type { Workspace } from "./state-contract.js";
 import type { OpenAISnapshot } from "./manifest.js";
-import { GateError, OriginalDownloadError } from "./errors.js";
-const MAX_RESPONSE = 2 * 1024 * 1024;
+import {
+  ContentTooLargeError,
+  GateError,
+  OriginalDownloadError,
+} from "./errors.js";
+const MAX_RESPONSE = 2097152;
 const textParts = z
   .array(z.object({ type: z.literal("text"), text: z.string() }))
   .max(1000);
@@ -156,10 +160,7 @@ export class OpenAIBackend implements Backend {
           }
           if (Number(response.headers.get("content-length")) > MAX_RESPONSE) {
             await response.body?.cancel();
-            throw new GateError(
-              "CONTENT_TOO_LARGE",
-              "OpenAI response exceeds limit",
-            );
+            throw new ContentTooLargeError("provider_response", MAX_RESPONSE);
           }
           if (!response.body)
             throw new GateError("NOT_FOUND", "Invalid OpenAI response");
@@ -172,9 +173,9 @@ export class OpenAIBackend implements Backend {
               if (done) break;
               size += value.byteLength;
               if (size > MAX_RESPONSE)
-                throw new GateError(
-                  "CONTENT_TOO_LARGE",
-                  "OpenAI response exceeds limit",
+                throw new ContentTooLargeError(
+                  "provider_response",
+                  MAX_RESPONSE,
                 );
               chunks.push(value);
             }
@@ -436,7 +437,7 @@ export class OpenAIBackend implements Backend {
       );
     const body = content.data.map((p) => p.text).join("\n");
     if (Buffer.byteLength(body) > MAX_RESPONSE)
-      throw new GateError("CONTENT_TOO_LARGE", "Parsed content exceeds limit");
+      throw new ContentTooLargeError("parsed_content", MAX_RESPONSE);
     return this.document(s, collection, path, body);
   }
   async status(

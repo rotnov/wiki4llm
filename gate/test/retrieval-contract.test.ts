@@ -729,3 +729,101 @@ test("native failed original downloads recheck authority before releasing diagno
       }
     });
 });
+
+for (const boundary of ["header", "stream"] as const)
+  test(`provider ${boundary} overflow reports its local read limit and cancels`, async (t) => {
+    let cancelled = false;
+    const f = setup(
+      t,
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(2097153));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          boundary === "header"
+            ? { headers: { "content-length": "2097153" } }
+            : {},
+        ),
+    );
+    await assert.rejects(
+      f.gateway.execute(f.token.id, "query", { query: "x" }),
+      {
+        code: "CONTENT_TOO_LARGE",
+        diagnostics: { stage: "provider_response", limitBytes: 2097152 },
+      },
+    );
+    assert.equal(cancelled, true);
+  });
+
+test("aggregate read output reports the 4 MiB logical tool budget", async (t) => {
+  const f = setup(t, async () =>
+    Response.json({
+      data: [{ type: "text", text: "é".repeat(750000) }],
+      has_more: false,
+    }),
+  );
+  await assert.rejects(
+    f.gateway.execute(f.token.id, "multi_get", { refs: [f.ref, f.ref, f.ref] }),
+    {
+      code: "CONTENT_TOO_LARGE",
+      diagnostics: { stage: "tool_response", limitBytes: 4194304 },
+    },
+  );
+});
+
+for (const stage of ["provider_response", "tool_response"] as const)
+  test(`native MCP delivers safe ${stage} attribution in one text error`, async (t) => {
+    const privateText = "private-body-marker ".repeat(
+      stage === "provider_response" ? 110000 : 4000,
+    );
+    const f = setup(t, async () =>
+      Response.json({
+        data: [
+          { file_id: "file-1", content: [{ type: "text", text: privateText }] },
+        ],
+        has_more: false,
+      }),
+    );
+    const server = await startServer(f.state, f.gateway, 0);
+    const client = new Client({ name: "size-attribution", version: "1" });
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(server.url), {
+          requestInit: {
+            headers: { Authorization: `Bearer ${f.token.secret}` },
+          },
+        }),
+      );
+      const result = CallToolResultSchema.parse(
+        await client.callTool({ name: "query", arguments: { query: "x" } }),
+      );
+      assert.equal(result.isError, true);
+      assert.equal(result.structuredContent, undefined);
+      assert.equal(result.content.length, 1);
+      const content = result.content[0]!;
+      assert.equal(content.type, "text");
+      assert.ok(content.type === "text");
+      assert.match(content.text, /^CONTENT_TOO_LARGE:/);
+      assert.ok(content.text.includes(" Diagnostics: "));
+      assert.deepEqual(JSON.parse(content.text.split(" Diagnostics: ")[1]!), {
+        stage,
+        limitBytes: stage === "provider_response" ? 2097152 : 65536,
+      });
+      for (const secret of [
+        "private-body-marker",
+        "file-1",
+        "proj_test",
+        "sk-proj-synthetic",
+        "README.md",
+      ])
+        assert.ok(!JSON.stringify(result).includes(secret));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });

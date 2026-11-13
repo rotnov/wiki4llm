@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { StateReader, Workspace } from "./state-contract.js";
 import type { Backend, DocumentMetadata, ReadFormat } from "./backend.js";
 import { resolveSelection, validateSlug, repositorySchema } from "./policy.js";
-import { GateError, denied, invalid } from "./errors.js";
+import { ContentTooLargeError, GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
 const MAX_REFERENCE_LENGTH = 8192;
 // Keep essential guidance in tool prose: some connectors flatten detailed schemas.
@@ -485,10 +485,9 @@ export class Gateway {
       throw new GateError("NOT_FOUND", "Workspace data unavailable");
     }
     validateDelivery();
-    const maxOutput =
-      tool === "get" || tool === "multi_get" ? 4 * 1024 * 1024 : 65536;
+    const maxOutput = tool === "get" || tool === "multi_get" ? 4194304 : 65536;
     if (Buffer.byteLength(JSON.stringify(result)) > maxOutput)
-      throw new GateError("CONTENT_TOO_LARGE");
+      throw new ContentTooLargeError("tool_response", maxOutput);
     return result;
   }
 }

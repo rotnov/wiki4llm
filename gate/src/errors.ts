@@ -20,6 +20,32 @@ export class GateError extends Error {
     super(message);
   }
 }
+type ContentSizeBoundary =
+  | [stage: "provider_response" | "parsed_content", limitBytes: 2097152]
+  | [stage: "tool_response", limitBytes: 65536 | 4194304];
+
+export class ContentTooLargeError extends GateError {
+  readonly diagnostics: Readonly<{
+    stage: ContentSizeBoundary[0];
+    limitBytes: ContentSizeBoundary[1];
+  }>;
+  constructor(...[stage, limitBytes]: ContentSizeBoundary) {
+    super("CONTENT_TOO_LARGE");
+    if (
+      !(
+        (stage === "provider_response" || stage === "parsed_content") &&
+        limitBytes === 2097152
+      ) &&
+      !(
+        stage === "tool_response" &&
+        (limitBytes === 65536 || limitBytes === 4194304)
+      )
+    )
+      throw new TypeError("Invalid content-size boundary");
+    this.diagnostics = Object.freeze({ stage, limitBytes });
+  }
+}
+
 // Provider diagnostics are opt-in and allowlisted; never retain a raw error body.
 export class OriginalDownloadError extends GateError {
   readonly diagnostics: Readonly<Record<string, string | number>>;
@@ -83,11 +109,23 @@ export function denied(): never {
 // Only fixed, reviewed explanations are exposed; never echo provider/state errors.
 export function publicError(error: unknown): string {
   if (!(error instanceof GateError)) return "NOT_FOUND";
+  if (error instanceof ContentTooLargeError) {
+    const { stage, limitBytes } = error.diagnostics;
+    const explanation =
+      stage === "provider_response"
+        ? "Provider response exceeds this gate's 2 MiB response-read limit. Use a narrower query or a local source; parsed line ranges cannot bypass this limit."
+        : stage === "parsed_content"
+          ? "Parsed content exceeds this gate's 2 MiB parsed-text limit. Use a local source; line ranges are applied after this check."
+          : limitBytes === 65536
+            ? "Selected tool result exceeds the 64 KiB logical response budget. Reduce the result limit."
+            : "Selected tool result exceeds the 4 MiB logical response budget. Request fewer documents or explicit parsed line ranges.";
+    return `${error.code}: ${explanation} No result content was returned. Diagnostics: ${JSON.stringify({ stage, limitBytes })}`;
+  }
   const explanations: Record<string, string> = {
     INCOMPLETE_CONTENT:
       "Provider content is incomplete; continuation is unsupported. For parsed reads try format=original; otherwise use a matching local source.",
     CONTENT_TOO_LARGE:
-      "Content exceeds the provider 2 MiB or tool response budget (query/find_documents 64 KiB; reads 4 MiB). Reduce the result limit or request fewer documents or explicit parsed line ranges; use a local source for larger files. Nothing was truncated.",
+      "Content exceeds the gate's 2 MiB provider-read or tool response budget (query/find_documents 64 KiB; reads 4 MiB). Reduce the result limit or request fewer documents or explicit parsed line ranges; use a local source for larger files. Nothing was truncated.",
     CONTENT_MISMATCH:
       "Original bytes do not match the published source hash; no content returned. Ask the publisher to verify the active file.",
     UNSUPPORTED_OPERATION:
