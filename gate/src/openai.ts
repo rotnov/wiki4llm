@@ -7,6 +7,7 @@ import type {
   DocumentDiscovery,
   Hit,
   SearchMode,
+  SearchOptions,
   IndexingStatus,
   ReadFormat,
 } from "./backend.js";
@@ -16,6 +17,7 @@ import {
   ContentTooLargeError,
   GateError,
   OriginalDownloadError,
+  invalid,
 } from "./errors.js";
 const MAX_RESPONSE = 2097152;
 const textParts = z
@@ -296,7 +298,14 @@ export class OpenAIBackend implements Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
+    options?: SearchOptions,
   ): Promise<Hit[]> {
+    if (
+      options?.openaiRanker !== undefined &&
+      options.openaiRanker !== "auto" &&
+      options.openaiRanker !== "none"
+    )
+      invalid();
     const s = this.snapshot(w),
       hits: Hit[] = [];
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
@@ -314,7 +323,12 @@ export class OpenAIBackend implements Backend {
           query,
           max_num_results: 50,
           rewrite_query: false,
-          ranking_options: { hybrid_search: weights[mode] },
+          ranking_options: {
+            hybrid_search: weights[mode],
+            ...(options?.openaiRanker !== undefined
+              ? { ranker: options.openaiRanker }
+              : {}),
+          },
         },
       );
       const parsed = page.safeParse(raw);

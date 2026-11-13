@@ -129,7 +129,7 @@ export function publicError(error: unknown): string {
     CONTENT_MISMATCH:
       "Original bytes do not match the published source hash; no content returned. Ask the publisher to verify the active file.",
     UNSUPPORTED_OPERATION:
-      "Published-path discovery is available only for OpenAI workspaces with metadata discovery support.",
+      "The selected backend does not support this operation or option. Published-path discovery and openaiRanker require OpenAI workspaces.",
     UNSUPPORTED_CONTENT:
       "Provider returned an unsupported parsed representation. Try format=original or a matching local source; no partial content was returned.",
     UNSUPPORTED_FORMAT:

@@ -1,6 +1,9 @@
 import type { Workspace } from "./state-contract.js";
 import type { SourceOrigin } from "./manifest.js";
 export type SearchMode = "lex" | "vec" | "hybrid";
+export interface SearchOptions {
+  openaiRanker?: "auto" | "none";
+}
 export interface IndexingStatus {
   id: string;
   status: string;
@@ -60,6 +63,7 @@ export interface Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
+    options?: SearchOptions,
   ): Promise<Hit[]>;
   read(
     workspace: Workspace,

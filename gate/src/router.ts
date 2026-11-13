@@ -1,4 +1,9 @@
-import type { Backend, SearchMode, ReadFormat } from "./backend.js";
+import type {
+  Backend,
+  SearchMode,
+  ReadFormat,
+  SearchOptions,
+} from "./backend.js";
 import type { Workspace } from "./state.js";
 import { OpenAIBackend } from "./openai.js";
 import { GateError } from "./errors.js";
@@ -40,8 +45,11 @@ export class RoutedBackend implements Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
+    options?: SearchOptions,
   ) {
-    return (await this.select(w)).search(w, q, mode, limit, signal);
+    if (options?.openaiRanker !== undefined && w.backend !== "openai")
+      throw new GateError("UNSUPPORTED_OPERATION");
+    return (await this.select(w)).search(w, q, mode, limit, signal, options);
   }
   async read(
     w: Workspace,
