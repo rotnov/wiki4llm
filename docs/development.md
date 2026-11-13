@@ -29,7 +29,15 @@ native QMD model and Docker qualification commands are documented in `gate/READM
 
 For retrieval diagnostics, validate the metadata reducer in the actual orchestration
 runtime before live calls with synthetic Unicode success, plain-text `isError`,
-malformed JSON and thrown tool errors; do not assume runtime globals are available.
+malformed JSON, `structuredContent: null` client wrappers (not a second payload), and
+thrown tool errors; cover allowlisted error codes without assuming runtime globals.
+Raw tool logs may retain full output while host truncation changes live model history.
+Validate effective outer-output and history budgets and gap-free bounded content
+after that layer; raw completeness or larger inner budgets alone are insufficient.
+Caller protocols must preserve mandatory committed project guidance, including
+required overlays, while distinguishing it from personal or session memory.
+Record parent phase-request timestamps at dispatch; never reconstruct missing
+request times from task-start events.
 Persist each attempt's outcome,
 error code, error message and timing, with secrets redacted and successful document
 bodies excluded. Keep missing coverage distinct from measured zero coverage.
