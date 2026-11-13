@@ -84,8 +84,6 @@ QMD discovery returns `UNSUPPORTED_OPERATION`; existing QMD tools are unchanged.
 Use returned refs with `get` or `multi_get`. See the [metadata discovery contract](docs/openai-backend.md#published-path-discovery)
 for ordering, provenance and publication boundaries.
 
-Optional `query.openaiRanker` accepts `auto` or `none` for OpenAI-only selections. Omission preserves the provider default; `none` disables reranking. Any selected QMD workspace rejects the option before search. This experimental control has no measured quality, latency or cost guarantee; result limits and all other retrieval settings are unchanged.
-
 For `query` and `status`, omitted workspace selection uses all effective grants, up to 20. Empty selection is rejected. An explicit unauthorized name rejects the entire request; masks expand only within effective grants. Results retain workspace, generation, collection, relative path and provider-specific source provenance. OpenAI status reports an unknown vector count as `null`. Cross-workspace ranking uses reciprocal per-workspace rank, not raw BM25 scores. Identical documents in different workspaces remain separate results.
 
 The existing `qgdoc:` document-reference and `qg_` token wire formats remain stable. Document references are untrusted locators, not bearer credentials. Every read re-authorizes them. Raw QMD short IDs, filesystem paths, fuzzy reads and arbitrary glob reads are not supported. Reindexing creates a fresh generation; old references become invalid and must be refreshed by querying or finding documents again.

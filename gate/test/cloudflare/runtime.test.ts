@@ -60,7 +60,6 @@ async function jwt(sub = "reader", extra: Record<string, unknown> = {}) {
 }
 const persist = mkdtempSync(join(tmpdir(), "gate-cf-"));
 let requests: string[] = [];
-const searchBodies: any[] = [];
 let barrier: { entered: () => void; wait: Promise<void> } | undefined;
 const options = (
   overrides: Record<string, string> = {},
@@ -95,8 +94,7 @@ const options = (
       b.entered();
       await b.wait;
     }
-    if (url.pathname.endsWith("/search")) {
-      searchBodies.push(await req.json());
+    if (url.pathname.endsWith("/search"))
       return MiniflareResponse.json({
         data: [
           {
@@ -106,7 +104,6 @@ const options = (
         ],
         has_more: false,
       });
-    }
     return MiniflareResponse.json({
       data: [{ type: "text", text: "line one\nline two" }],
       has_more: false,
@@ -326,49 +323,6 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         }
       },
     );
-    await t.test("ranker is opt-in through real Worker requests", async () => {
-      const args = {
-        query: "fixture",
-        workspaces: ["example"],
-        limit: 5,
-        includeSnippets: false,
-      };
-      searchBodies.length = 0;
-      const baseline = await rpc("query", args);
-      const expected = {
-        query: "fixture",
-        max_num_results: 50,
-        rewrite_query: false,
-        ranking_options: {
-          hybrid_search: { embedding_weight: 1, text_weight: 1 },
-        },
-      };
-      assert.deepEqual(searchBodies, [expected, expected]);
-      for (const openaiRanker of ["auto", "none"]) {
-        searchBodies.length = 0;
-        assert.deepEqual(
-          await rpc("query", { ...args, openaiRanker }),
-          baseline,
-        );
-        assert.deepEqual(
-          searchBodies,
-          [1, 2].map(() => ({
-            ...expected,
-            ranking_options: {
-              ...expected.ranking_options,
-              ranker: openaiRanker,
-            },
-          })),
-        );
-      }
-      const count = requests.length;
-      for (const args of [
-        { query: "q", openaiRanker: "fast" },
-        { query: "q", openaiRanker: "none", workspaces: ["example", "hidden"] },
-      ])
-        assert.equal((await rpc("query", args)).isError, true);
-      assert.equal(requests.length, count);
-    });
     await t.test(
       "query provenance, exact get, forbidden mixed multi_get has zero upstream calls",
       async () => {

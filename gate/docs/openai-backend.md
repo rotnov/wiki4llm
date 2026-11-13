@@ -269,21 +269,6 @@ migration or grant change is required for parsed retrieval. Unavailable original
 require a separately reviewed provider/source strategy; permission expansion is
 not an automatic remedy.
 
-## Optional native ranker
-
-`query.openaiRanker` is an experimental per-call selector: `auto` or `none`.
-Omission leaves the provider field absent, preserving existing behavior. Explicit
-values add only `ranking_options.ranker`; mode weights, 50 candidates per collection,
-`rewrite_query: false`, result limits, snippets, deduplication and references stay
-unchanged. All selected workspaces must use OpenAI; a QMD selection rejects with
-`UNSUPPORTED_OPERATION` before any search. Authorization precedes that check.
-
-The [direct-search API](https://developers.openai.com/api/reference/resources/vector_stores/methods/search)
-defines `auto` as the default and `none` as disabling reranking. Synthetic tests
-verify request forwarding, not live compatibility with hybrid weights or retrieval
-quality. Keep omission as the default until a bounded authorized comparison
-establishes useful quality and latency; no cost saving is established.
-
 ## Choosing and measuring retrieval
 
 A remote index is useful when the source checkout is unavailable or the question

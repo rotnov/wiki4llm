@@ -11,13 +11,7 @@ import {
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import type {
-  Backend,
-  Document,
-  Hit,
-  SearchMode,
-  SearchOptions,
-} from "./backend.js";
+import type { Backend, Document, Hit, SearchMode } from "./backend.js";
 import type { Workspace } from "./state.js";
 import { validateSlug } from "./policy.js";
 import { validatePath } from "./gateway.js";
@@ -197,10 +191,7 @@ export class QmdBackend implements Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
-    options?: SearchOptions,
   ): Promise<Hit[]> {
-    if (options?.openaiRanker !== undefined)
-      throw new GateError("UNSUPPORTED_OPERATION");
     signal.throwIfAborted();
     const store = this.store(w);
     const results =

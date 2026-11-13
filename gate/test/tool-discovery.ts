@@ -20,20 +20,6 @@ export function assertInputDefaults(tools: any[]) {
     },
     status: { input: {}, defaults: {} },
   };
-  const ranker = tools.find((tool) => tool.name === "query").inputSchema
-    .properties.openaiRanker;
-  assert.deepEqual(ranker.enum, ["auto", "none"]);
-  assert.equal(ranker.default, undefined);
-  for (const value of ["auto", "none"])
-    assert.equal(
-      toolSchemas.query.safeParse({ query: "q", openaiRanker: value }).success,
-      true,
-    );
-  for (const value of [null, "default-2024-11-15", "fast", false])
-    assert.equal(
-      toolSchemas.query.safeParse({ query: "q", openaiRanker: value }).success,
-      false,
-    );
   for (const name of Object.keys(cases) as (keyof typeof cases)[]) {
     const { input, defaults } = cases[name];
     const schema = tools.find((tool) => tool.name === name).inputSchema;
@@ -76,7 +62,6 @@ export function assertParameterGuidance(tools: any[]) {
       query: ["1", "4096"],
       workspaces: ["20", "80", "omitted"],
       mode: ["lex", "vec", "hybrid"],
-      openaiRanker: ["optional", "auto", "none", "OpenAI", "omitted"],
       limit: ["1", "20", "default 10"],
       includeSnippets: ["boolean", "default true", "false", "metadata"],
     },
@@ -143,9 +128,6 @@ export function assertParameterGuidance(tools: any[]) {
       "vec",
       "hybrid",
       "default hybrid",
-      "openaiRanker",
-      "auto",
-      "none",
       "includeSnippets",
       "default true",
       "false",
