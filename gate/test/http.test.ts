@@ -1,5 +1,8 @@
 import { toolPayload } from "./tool-payload.js";
-import { assertParameterGuidance } from "./tool-discovery.js";
+import {
+  assertInputDefaults,
+  assertParameterGuidance,
+} from "./tool-discovery.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { request } from "node:http";
@@ -86,6 +89,7 @@ test("official MCP client authenticates each request, scopes tools, and cannot r
       ],
     );
     assertParameterGuidance((await client.listTools()).tools);
+    assertInputDefaults((await client.listTools()).tools);
     const result: any = await client.callTool({
       name: "list_workspaces",
       arguments: {},

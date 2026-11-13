@@ -1,4 +1,55 @@
 import assert from "node:assert/strict";
+import { toolSchemas } from "../src/gateway.js";
+
+// Assert wire-required fields independently of the server's Zod parser.
+export function assertInputDefaults(tools: any[]) {
+  const cases = {
+    list_workspaces: { input: {}, defaults: { offset: 0, limit: 20 } },
+    query: {
+      input: { query: "guide" },
+      defaults: { mode: "hybrid", limit: 10 },
+    },
+    find_documents: {
+      input: { workspace: "docs", query: "guide" },
+      defaults: { limit: 5 },
+    },
+    get: { input: { ref: "qgdoc:example" }, defaults: { format: "parsed" } },
+    multi_get: {
+      input: { refs: ["qgdoc:example"] },
+      defaults: { format: "parsed" },
+    },
+    status: { input: {}, defaults: {} },
+  };
+  for (const name of Object.keys(cases) as (keyof typeof cases)[]) {
+    const { input, defaults } = cases[name];
+    const schema = tools.find((tool) => tool.name === name).inputSchema;
+    assert.deepEqual(schema.required ?? [], Object.keys(input), name);
+    assert.equal(schema.additionalProperties, false, name);
+    assert.equal(
+      toolSchemas[name].safeParse({ ...input, unknown: true }).success,
+      false,
+      name,
+    );
+    assert.deepEqual(toolSchemas[name].parse(input), { ...input, ...defaults });
+    for (const [field, value] of Object.entries(defaults)) {
+      assert.equal(schema.properties[field].default, value, `${name}.${field}`);
+      assert.equal(
+        toolSchemas[name].safeParse({ ...input, [field]: null }).success,
+        false,
+        `${name}.${field} is optional, not nullable`,
+      );
+    }
+    for (const field of Object.keys(input)) {
+      const missing: Record<string, unknown> = { ...input, ...defaults };
+      delete missing[field];
+      assert.equal(
+        toolSchemas[name].safeParse(missing).success,
+        false,
+        `${name}.${field} is required`,
+      );
+    }
+  }
+}
 
 // Check wire output, including prose retained by connectors that flatten schemas.
 export function assertParameterGuidance(tools: any[]) {

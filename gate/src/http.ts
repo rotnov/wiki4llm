@@ -122,7 +122,7 @@ export async function startServer(
         tools: Object.entries(toolSchemas).map(([name, schema]) => ({
           name,
           description: toolDescriptions[name as keyof typeof toolSchemas],
-          inputSchema: z.toJSONSchema(schema) as any,
+          inputSchema: z.toJSONSchema(schema, { io: "input" }) as any,
           annotations: {
             readOnlyHint: true,
             destructiveHint: false,
