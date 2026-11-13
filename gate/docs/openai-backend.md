@@ -196,6 +196,9 @@ API has no qualified continuation request parameter. A local line range cannot
 complete such a provider response. Unsupported parsed shapes fail explicitly with
 `UNSUPPORTED_CONTENT` and suggest original format or a local source. `complete: true` means the full content available
 from that provider endpoint, not proof of extraction fidelity to the original file.
+`complete` and `nextLine` describe server output, not downstream model visibility;
+if the client truncates it, use bounded parsed ranges or bounded local reads and
+[verify gap-free coverage after client processing](../../docs/development.md).
 
 `format="original"` uses the official [Files content endpoint](https://developers.openai.com/api/reference/resources/files/methods/content)
 for the immutable manifest's file ID, when the provider permits downloading it.
@@ -293,10 +296,9 @@ The current implementation has distinct model-output and provider-work boundarie
   optionally slices explicitly requested lines. `multi_get` reads serially from
   each document start; omitted range limits return full available content.
   Smaller line limits reduce the returned text, not the full-document provider read.
-- `src/http.ts` supplies both MCP text content and structured content. Code-mode
-  callers should display one text representation rather than serialize the entire
-  envelope and repeat the same result. Binary resource bytes are emitted once.
-  This does not change provider work.
+- `src/tool-result.ts` serializes successful JSON payloads once in MCP text
+  content; binary resource bytes are emitted once. This changes response
+  representation, not provider work.
 
 These are source-level explanations, not measured attribution of elapsed time or
 money. This retrieval contract needs controlled quality/efficiency measurement;
