@@ -23,7 +23,7 @@ try {
   const signal = new AbortController().signal,
     results = [];
   for (const mode of ["vec", "hybrid"] as const) {
-    const { hits } = await backend.search(
+    const hits = await backend.search(
       state.workspace("qualification"),
       "quartz optics",
       mode,

@@ -37,19 +37,12 @@ test("real QMD indexes separate stores, reads exact paths, persists, and shares 
       10,
       signal,
     );
-    assert.equal(a.hits.length, 1);
-    assert.match(a.hits[0]!.body, /amplifier/);
-    assert.doesNotMatch(a.hits[0]!.body, /dsx/);
+    assert.equal(a.length, 1);
+    assert.match(a[0]!.body, /amplifier/);
+    assert.doesNotMatch(a[0]!.body, /dsx/);
     assert.equal(
-      (await b.search(s.workspace("dsx"), "quartz", "lex", 10, signal)).hits
-        .length,
+      (await b.search(s.workspace("dsx"), "quartz", "lex", 10, signal)).length,
       1,
-    );
-    await assert.rejects(
-      b.search(s.workspace("amplifier"), "quartz", "lex", 10, signal, {
-        rewriteQuery: true,
-      }),
-      { code: "UNSUPPORTED_OPERATION" },
     );
     assert.equal(b.runtimeCount, 1);
     assert.equal(

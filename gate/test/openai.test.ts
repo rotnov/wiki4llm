@@ -259,47 +259,34 @@ test("missing credentials, permission errors, redirects, response bounds and abo
   assert.equal(calls, 0);
 });
 test("in-flight publication, permission and credential revocation prevent delivery", async (t) => {
-  for (const rewrite_query of [false, true])
-    for (const change of [
-      "publication",
-      "permission",
-      "token",
-      "cancellation",
-    ]) {
-      const { s, token } = setup(t);
-      let release: () => void = () => {};
-      let started: () => void = () => {};
-      const waiting = new Promise<void>((r) => (started = r));
-      const pending = new Promise<void>((r) => (release = r));
-      const b = await backend({
-        env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
-        transport: async () => {
-          started();
-          await pending;
-          return json({ data: [], has_more: false });
-        },
-      });
-      const g = new Gateway(s, b);
-      const controller = new AbortController();
-      const op = g.execute(
-        token.id,
-        "query",
-        { query: "q", rewrite_query },
-        controller.signal,
-      );
-      await waiting;
-      if (change === "publication") {
-        const m = fixture();
-        m.generation++;
-        m.publication_id = "7d0c9d2a-e2ad-45ce-8ff1-c736ffdaf90a";
-        s.importOpenAI("docs", JSON.stringify(m), binding);
-      } else if (change === "permission")
-        s.setPrincipal("reader", { allow: [], deny: [] });
-      else if (change === "token") s.revokeToken(token.id);
-      else controller.abort();
-      release();
-      await assert.rejects(op);
-    }
+  for (const change of ["publication", "permission", "token"]) {
+    const { s, token } = setup(t);
+    let release: () => void = () => {};
+    let started: () => void = () => {};
+    const waiting = new Promise<void>((r) => (started = r));
+    const pending = new Promise<void>((r) => (release = r));
+    const b = await backend({
+      env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
+      transport: async () => {
+        started();
+        await pending;
+        return json({ data: [], has_more: false });
+      },
+    });
+    const g = new Gateway(s, b);
+    const op = g.execute(token.id, "query", { query: "q" });
+    await waiting;
+    if (change === "publication") {
+      const m = fixture();
+      m.generation++;
+      m.publication_id = "7d0c9d2a-e2ad-45ce-8ff1-c736ffdaf90a";
+      s.importOpenAI("docs", JSON.stringify(m), binding);
+    } else if (change === "permission")
+      s.setPrincipal("reader", { allow: [], deny: [] });
+    else s.revokeToken(token.id);
+    release();
+    await assert.rejects(op);
+  }
 });
 
 test("search stays within the provider's 50-result maximum", async (t) => {
@@ -313,218 +300,5 @@ test("search stays within the provider's 50-result maximum", async (t) => {
       return json({ data: [], has_more: false });
     },
   });
-  assert.deepEqual(await b.search(w, "quartz", "hybrid", 20, signal()), {
-    hits: [],
-  });
-});
-
-test("query rewriting is opt-in and preserves requests, ranking, filters and default output", async (t) => {
-  const { s, token } = setup(t);
-  const requests: any[] = [];
-  const b = await backend({
-    env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
-    transport: async (url: string, init: RequestInit) => {
-      requests.push(JSON.parse(String(init.body)));
-      return json({
-        data: [
-          { file_id: "file-stale", content: [{ type: "text", text: "stale" }] },
-          {
-            file_id: url.includes("vs_test") ? "file-1" : "file-3",
-            content: [{ type: "text", text: "excerpt" }],
-          },
-          {
-            file_id: url.includes("vs_test") ? "file-3" : "file-1",
-            content: [{ type: "text", text: "foreign" }],
-          },
-        ],
-        has_more: false,
-        search_query: [
-          url.includes("vs_test") ? "effective guide" : "effective second",
-        ],
-      });
-    },
-  });
-  const { RoutedBackend } = await import("../src/router.js");
-  const router = new RoutedBackend(s.dir, b);
-  const g = new Gateway(s, router);
-  for (const mode of ["lex", "vec", "hybrid"]) {
-    requests.length = 0;
-    const omitted: any = await g.execute(token.id, "query", {
-      query: "quartz",
-      mode,
-      limit: 1,
-    });
-    const baseline = structuredClone(requests);
-    requests.length = 0;
-    const disabled = await g.execute(token.id, "query", {
-      query: "quartz",
-      mode,
-      limit: 1,
-      rewrite_query: false,
-    });
-    assert.deepEqual(disabled, omitted);
-    assert.deepEqual(requests, baseline);
-    assert.ok(baseline.every((r: any) => r.rewrite_query === false));
-    assert.equal(Object.hasOwn(omitted, "effectiveQueries"), false);
-    requests.length = 0;
-    const enabled: any = await g.execute(token.id, "query", {
-      query: "quartz",
-      mode,
-      limit: 1,
-      rewrite_query: true,
-    });
-    assert.deepEqual(
-      requests,
-      baseline.map((r: any) => ({ ...r, rewrite_query: true })),
-    );
-    const { effectiveQueries, ...rest } = enabled;
-    assert.deepEqual(rest, omitted);
-    assert.deepEqual(effectiveQueries, [
-      {
-        workspace: "docs",
-        collection: "guide",
-        search_query: ["effective guide"],
-      },
-      {
-        workspace: "docs",
-        collection: "second",
-        search_query: ["effective second"],
-      },
-    ]);
-    assert.equal(enabled.results[0].snippet, "excerpt");
-  }
-  await router.close();
-});
-
-test("rewrite metadata is untrusted, bounded and only returned when requested", async (t) => {
-  const { s, token } = setup(t);
-  let metadata: unknown;
-  const b = await backend({
-    env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
-    transport: async () =>
-      json({ data: [], has_more: false, search_query: metadata }),
-  });
-  const g = new Gateway(s, b);
-  for (metadata of [
-    undefined,
-    null,
-    "scalar",
-    [2],
-    [],
-    [""],
-    Array(9).fill("q"),
-    ["x".repeat(4097)],
-    ["é".repeat(3000)],
-    { secret: "ignored" },
-  ]) {
-    const result: any = await g.execute(token.id, "query", {
-      query: "q",
-      rewrite_query: true,
-    });
-    assert.deepEqual(
-      result.effectiveQueries.map((x: any) => x.search_query),
-      [null, null],
-    );
-    assert.deepEqual(result.results, []);
-    assert.equal(
-      Object.hasOwn(
-        await g.execute(token.id, "query", { query: "q" }),
-        "effectiveQueries",
-      ),
-      false,
-    );
-  }
-  // The output budget spans collections and workspaces, even when there are no hits.
-  metadata = ["x".repeat(3000)];
-  s.setPrincipal("reader", { allow: ["docs", "hidden"], deny: [] });
-  const result: any = await g.execute(token.id, "query", {
-    query: "q",
-    rewrite_query: true,
-  });
-  assert.equal(result.effectiveQueries.length, 4);
-  assert.deepEqual(
-    result.effectiveQueries.map((x: any) => x.search_query),
-    [metadata, null, null, null],
-  );
-  assert.deepEqual(
-    new Set(result.effectiveQueries.map((x: any) => x.workspace)),
-    new Set(["docs", "hidden"]),
-  );
-});
-
-test("rewrite validates all workspace authorization and backend support before any I/O", async (t) => {
-  const { s, w, token } = setup(t);
-  let calls = 0,
-    opens = 0;
-  const b = await backend({
-    env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
-    transport: async () => {
-      calls++;
-      return json({ data: [], has_more: false });
-    },
-  });
-  const { RoutedBackend } = await import("../src/router.js");
-  const router = new RoutedBackend(s.dir, b, async () => {
-    opens++;
-    throw Error("must not open");
-  });
-  const g = new Gateway(s, router);
-  await assert.rejects(
-    g.execute(token.id, "query", {
-      query: "q",
-      workspaces: ["docs", "hidden"],
-      rewrite_query: true,
-    }),
-    { code: "ACCESS_DENIED" },
-  );
-  for (const rewrite_query of ["true", 1, null, {}])
-    await assert.rejects(
-      g.execute(token.id, "query", { query: "q", rewrite_query }),
-      { code: "INVALID_INPUT" },
-    );
-  s.setWorkspace("local");
-  s.publishGeneration("local", "g-local");
-  s.setPrincipal("reader", { allow: ["docs", "local"], deny: [] });
-  for (const workspaces of [
-    undefined,
-    ["docs", "local"],
-    ["local", "docs"],
-    ["local"],
-  ])
-    await assert.rejects(
-      g.execute(token.id, "query", {
-        query: "q",
-        workspaces,
-        rewrite_query: true,
-      }),
-      { code: "UNSUPPORTED_OPERATION" },
-    );
-  await assert.rejects(
-    router.search(s.workspace("local"), "q", "lex", 1, signal(), {
-      rewriteQuery: true,
-    }),
-    { code: "UNSUPPORTED_OPERATION" },
-  );
-  const aborted = new AbortController();
-  aborted.abort();
-  await assert.rejects(
-    b.search(w, "q", "hybrid", 1, aborted.signal, { rewriteQuery: true }),
-    { code: "CANCELLED" },
-  );
-  assert.equal(calls, 0);
-  assert.equal(opens, 0);
-  await router.close();
-});
-
-test("rewrite retains the provider deadline", async (t) => {
-  const { w } = setup(t);
-  const b = await backend({
-    env: { SYNTHETIC_QUERY_KEY: "sk-proj-synthetic" },
-    timeoutMs: 20,
-    transport: async () => new Promise(() => {}),
-  });
-  await assert.rejects(
-    b.search(w, "q", "hybrid", 1, signal(), { rewriteQuery: true }),
-    { code: "CANCELLED" },
-  );
+  assert.deepEqual(await b.search(w, "quartz", "hybrid", 20, signal()), []);
 });

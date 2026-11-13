@@ -23,7 +23,7 @@ test("official MCP client authenticates each request, scopes tools, and cannot r
   });
   const g = new Gateway(s, {
     async search() {
-      return { hits: [] };
+      return [];
     },
     async read() {
       return undefined;
@@ -115,7 +115,7 @@ test("container bind accepts only explicitly configured authorities and still re
   const state = new State(dir);
   const gateway = new Gateway(state, {
     async search() {
-      return { hits: [] };
+      return [];
     },
     async read() {
       return undefined;

@@ -7,9 +7,6 @@ import type {
   DocumentDiscovery,
   Hit,
   SearchMode,
-  SearchOptions,
-  SearchResult,
-  EffectiveQuery,
   IndexingStatus,
   ReadFormat,
 } from "./backend.js";
@@ -20,7 +17,6 @@ const MAX_RESPONSE = 2 * 1024 * 1024;
 const textParts = z
   .array(z.object({ type: z.literal("text"), text: z.string() }))
   .max(1000);
-const effectiveQuery = z.array(z.string().min(1).max(4096)).min(1).max(8);
 const page = z.object({
   data: z.array(z.unknown()).max(1000),
   has_more: z.boolean(),
@@ -299,9 +295,7 @@ export class OpenAIBackend implements Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
-    options?: SearchOptions,
-  ): Promise<SearchResult> {
-    const effectiveQueries: EffectiveQuery[] = [];
+  ): Promise<Hit[]> {
     const s = this.snapshot(w),
       hits: Hit[] = [];
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
@@ -318,22 +312,13 @@ export class OpenAIBackend implements Backend {
         {
           query,
           max_num_results: 50,
-          rewrite_query: options?.rewriteQuery ?? false,
+          rewrite_query: false,
           ranking_options: { hybrid_search: weights[mode] },
         },
       );
       const parsed = page.safeParse(raw);
       if (!parsed.success || parsed.data.data.length > 50)
         throw new GateError("NOT_FOUND", "Invalid OpenAI search response");
-      if (options?.rewriteQuery) {
-        const parsedQuery = effectiveQuery.safeParse(
-          (raw as Record<string, unknown>).search_query,
-        );
-        effectiveQueries.push({
-          collection: name,
-          search_query: parsedQuery.success ? parsedQuery.data : null,
-        });
-      }
       const active = new Map(
         Object.entries(c.files).map(([path, f]) => [f.file_id, path]),
       );
@@ -366,17 +351,14 @@ export class OpenAIBackend implements Backend {
         });
       }
     }
-    return {
-      ...(options?.rewriteQuery ? { effectiveQueries } : {}),
-      hits: hits
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            a.collection.localeCompare(b.collection) ||
-            a.path.localeCompare(b.path),
-        )
-        .slice(0, limit),
-    };
+    return hits
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.collection.localeCompare(b.collection) ||
+          a.path.localeCompare(b.path),
+      )
+      .slice(0, limit);
   }
   async read(
     w: Workspace,

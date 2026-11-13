@@ -1,11 +1,6 @@
 import { z } from "zod";
 import type { StateReader, Workspace } from "./state-contract.js";
-import type {
-  Backend,
-  DocumentMetadata,
-  ReadFormat,
-  EffectiveQuery,
-} from "./backend.js";
+import type { Backend, DocumentMetadata, ReadFormat } from "./backend.js";
 import { resolveSelection, validateSlug, repositorySchema } from "./policy.js";
 import { GateError, denied, invalid } from "./errors.js";
 // Covers UTF-8/base64 expansion of a 1024-character path plus identifiers.
@@ -61,13 +56,6 @@ export const toolSchemas = {
         .max(4096)
         .describe(parameterDescriptions.query),
       workspaces: selectors,
-      rewrite_query: z
-        .boolean()
-        .default(false)
-        .optional()
-        .describe(
-          "rewrite_query: boolean, default false. Opt in to native OpenAI query rewriting; unsupported for QMD. Returns bounded effectiveQueries metadata when true.",
-        ),
       mode: z
         .enum(["lex", "vec", "hybrid"])
         .default("hybrid")
@@ -167,7 +155,7 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   list_workspaces:
     "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
   query:
-    "Discover authorized documents; OpenAI: one full first-ranked excerpt. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. lex/vec/hybrid (default hybrid). rewrite_query: false; true OpenAI-only. Prefer local repository + relative path with own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
+    "Discover authorized documents. OpenAI: one full first-ranked excerpt each. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer local repository + relative path with your own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
   find_documents:
     "Find published paths in one exact authorized OpenAI workspace by literal case-insensitive fragment. Optional exact case-sensitive repository filter precedes ranking; limit 1-20 (default 5). No bodies/provider calls. hasMore signals omitted matches; narrow query/repository or raise limit, no pagination. Use refs with get/multi_get; paths do not prove authority. QMD unsupported.",
   get: "Read query/find_documents ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
@@ -386,12 +374,7 @@ export class Gateway {
             workspaces = authorize(
               resolveSelection(context.allowed, a.workspaces),
             );
-          if (a.rewrite_query && workspaces.some((w) => w.backend !== "openai"))
-            throw new GateError("UNSUPPORTED_OPERATION");
           const hits = [];
-          const effectiveQueries: (EffectiveQuery & { workspace: string })[] =
-            [];
-          let queryBytesRemaining = 4096;
           for (const w of workspaces) {
             cancelled(signal);
             if (!w.generation)
@@ -402,24 +385,8 @@ export class Gateway {
               a.mode,
               a.limit,
               signal,
-              a.rewrite_query ? { rewriteQuery: true } : undefined,
             );
-            if (a.rewrite_query) {
-              for (const entry of found.effectiveQueries ?? []) {
-                const bytes = Buffer.byteLength(
-                  JSON.stringify(entry.search_query),
-                );
-                const search_query =
-                  bytes <= queryBytesRemaining ? entry.search_query : null;
-                if (search_query !== null) queryBytesRemaining -= bytes;
-                effectiveQueries.push({
-                  workspace: w.id,
-                  collection: entry.collection,
-                  search_query,
-                });
-              }
-            }
-            for (const [rank, hit] of found.hits.slice(0, a.limit).entries())
+            for (const [rank, hit] of found.slice(0, a.limit).entries())
               hits.push({
                 ...describe(w, hit),
                 score: 1 / (61 + rank),
@@ -434,7 +401,6 @@ export class Gateway {
           );
           result = {
             results: hits.slice(0, a.limit),
-            ...(a.rewrite_query ? { effectiveQueries } : {}),
             searchedWorkspaces: workspaces.map((w) => w.id),
             ranking: "per-workspace reciprocal rank (k=60)",
             ...(workspaces.some((w) => w.backend === "openai")
