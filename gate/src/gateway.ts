@@ -15,6 +15,8 @@ const parameterDescriptions = {
     "workspaces: up to 20 selectors, each at most 80 characters; names or wildcard masks within authorized grants. When omitted, use all effective grants (at most 20 workspaces); empty selection is rejected.",
   mode: "mode: lex, vec or hybrid, default hybrid. QMD lex is model-free; OpenAI modes control embedding/text weights.",
   queryLimit: "limit: integer 1-20, default 10 results.",
+  includeSnippets:
+    "includeSnippets: boolean, default true; false omits entire snippets for metadata-only discovery before separate source reads.",
   ref: "ref: exact document reference returned by query or find_documents, at most 8192 characters.",
   fromLine: "fromLine: integer 1-1000000, default 1; one-based starting line.",
   maxLines:
@@ -67,6 +69,10 @@ export const toolSchemas = {
         .max(20)
         .default(10)
         .describe(parameterDescriptions.queryLimit),
+      includeSnippets: z
+        .boolean()
+        .default(true)
+        .describe(parameterDescriptions.includeSnippets),
     })
     .strict(),
   find_documents: z
@@ -155,7 +161,7 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   list_workspaces:
     "List authorized workspaces. limit 1-50 (default 20); offset default 0. Pass nextOffset as offset for the next page; null means done.",
   query:
-    "Discover authorized documents. OpenAI: one full first-ranked excerpt each. limit 1-20 (default 10); workspaces omitted: all authorized, at most 20. mode lex/vec/hybrid (default hybrid). Prefer local repository + relative path with your own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
+    "Discover authorized documents. OpenAI: full first-ranked excerpt each. includeSnippets default true; false: metadata only. limit 1-20 (default 10); workspaces omitted: all authorized, max 20. mode lex/vec/hybrid (default hybrid). Prefer local repository + relative path via own tools; report revision differences. Use get if unavailable. source.sha256 hashes original bytes.",
   find_documents:
     "Find published paths in one exact authorized OpenAI workspace by literal case-insensitive fragment. Optional exact case-sensitive repository filter precedes ranking; limit 1-20 (default 5). No bodies/provider calls. hasMore signals omitted matches; narrow query/repository or raise limit, no pagination. Use refs with get/multi_get; paths do not prove authority. QMD unsupported.",
   get: "Read query/find_documents ref: format parsed (default) returns full available text; original returns verified bytes (binary MCP resource). Prefer accessible local repository + relative path using your own tools; report revision differences. Use get if unavailable. Optional maxLines 1-200, fromLine one-based (default 1), parsed only. source.sha256 hashes original bytes, not parsed text.",
@@ -390,7 +396,7 @@ export class Gateway {
               hits.push({
                 ...describe(w, hit),
                 score: 1 / (61 + rank),
-                snippet: hit.body,
+                ...(a.includeSnippets ? { snippet: hit.body } : {}),
               });
           }
           hits.sort(
@@ -402,6 +408,7 @@ export class Gateway {
           result = {
             results: hits.slice(0, a.limit),
             searchedWorkspaces: workspaces.map((w) => w.id),
+            ...(!a.includeSnippets ? { snippetsIncluded: false } : {}),
             ranking: "per-workspace reciprocal rank (k=60)",
             ...(workspaces.some((w) => w.backend === "openai")
               ? {

@@ -91,6 +91,110 @@ test("query preserves the full first-ranked excerpt for each canonical document"
   assert.equal("excerpts" in r.results[0], false);
   assert.equal(r.results[0].source.repository, "example/guide");
 });
+test("query metadata projection preserves provider requests, ranking, refs and provenance", async (t) => {
+  const requests: { url: string; body: unknown }[] = [];
+  const f = setup(t, async (url, init) => {
+    requests.push({ url, body: JSON.parse(String(init.body)) });
+    return Response.json({
+      data: ["first é 🌍 passage", "later same-document passage"].map(
+        (text) => ({
+          file_id: url.includes("vs_test") ? "file-1" : "file-3",
+          content: [{ type: "text", text }],
+        }),
+      ),
+      has_more: false,
+    });
+  });
+  const args = { query: "answer", mode: "vec", limit: 20 };
+  const full: any = await f.gateway.execute(f.token.id, "query", args);
+  const explicit = await f.gateway.execute(f.token.id, "query", {
+    ...args,
+    includeSnippets: true,
+  });
+  assert.deepEqual(explicit, full);
+  assert.equal("snippetsIncluded" in full, false);
+  const metadata: any = await f.gateway.execute(f.token.id, "query", {
+    ...args,
+    includeSnippets: false,
+  });
+  assert.deepEqual(metadata, {
+    ...full,
+    results: full.results.map(({ snippet: _snippet, ...rest }: any) => rest),
+    snippetsIncluded: false,
+  });
+  assert.equal(metadata.results.length, 2);
+  assert.equal(metadata.results[0].ref, f.ref);
+  assert.equal(metadata.results[0].source.repository, "example/guide");
+  assert.ok(metadata.results.every((hit: any) => !("snippet" in hit)));
+  assert.deepEqual(requests.slice(2, 4), requests.slice(0, 2));
+  assert.deepEqual(requests.slice(4, 6), requests.slice(0, 2));
+  assert.ok(requests.every(({ body }: any) => body.max_num_results === 50));
+});
+
+test("query rejects non-boolean includeSnippets before provider work", async (t) => {
+  const f = setup(t);
+  for (const includeSnippets of [null, 0, 1, "false", "true", [], {}])
+    await assert.rejects(
+      f.gateway.execute(f.token.id, "query", { query: "x", includeSnippets }),
+      { code: "INVALID_INPUT" },
+    );
+  assert.deepEqual(f.calls, []);
+});
+
+test("twenty full excerpts overflow while their metadata fits the unchanged budget", async (t) => {
+  const f = setup(t, async (url) =>
+    Response.json({
+      data: url.includes("vs_test")
+        ? Array.from({ length: 20 }, (_, i) => ({
+            file_id: `file-synthetic-${i}`,
+            content: [{ type: "text", text: "é".repeat(2000) }],
+          }))
+        : [],
+      has_more: false,
+    }),
+  );
+  const template = f.manifest.collections.guide.files["README.md"];
+  f.manifest.collections.guide.files = Object.fromEntries(
+    Array.from({ length: 20 }, (_, i) => {
+      const path = `document-${i}.md`;
+      return [path, { ...template, path, file_id: `file-synthetic-${i}` }];
+    }),
+  );
+  f.manifest.generation++;
+  f.manifest.publication_id = "7d0c9d2a-e2ad-45ce-8ff1-c736ffdaf90a";
+  f.state.importOpenAI("docs", JSON.stringify(f.manifest), f.binding);
+  for (const includeSnippets of [undefined, true])
+    await assert.rejects(
+      f.gateway.execute(f.token.id, "query", {
+        query: "x",
+        limit: 20,
+        ...(includeSnippets === undefined ? {} : { includeSnippets }),
+      }),
+      {
+        code: "CONTENT_TOO_LARGE",
+        diagnostics: { stage: "tool_response", limitBytes: 65536 },
+      },
+    );
+  const metadata: any = await f.gateway.execute(f.token.id, "query", {
+    query: "x",
+    limit: 20,
+    includeSnippets: false,
+  });
+  assert.equal(metadata.results.length, 20);
+  assert.equal(metadata.snippetsIncluded, false);
+  assert.ok(metadata.results.every((hit: any) => !("snippet" in hit)));
+  assert.ok(Buffer.byteLength(JSON.stringify(metadata)) < 65536);
+});
+
+test("metadata-only query preserves malformed-provider rejection", async (t) => {
+  const f = setup(t, async () => new Response("not JSON"));
+  for (const includeSnippets of [true, false])
+    await assert.rejects(
+      f.gateway.execute(f.token.id, "query", { query: "x", includeSnippets }),
+      { code: "NOT_FOUND" },
+    );
+});
+
 test("parsed default and multi_get return complete files; explicit ranges remain bounded", async (t) => {
   const { gateway, token, ref } = setup(t);
   const full: any = await gateway.execute(token.id, "get", { ref });
@@ -157,7 +261,7 @@ for (const transport of ["native", "worker"] as const)
         assert.equal(tool.outputSchema, undefined);
       call = async (args) =>
         client.callTool({
-          name: args.refs ? "multi_get" : "get",
+          name: args.query ? "query" : args.refs ? "multi_get" : "get",
           arguments: args,
         });
     } else {
@@ -166,7 +270,10 @@ for (const transport of ["native", "worker"] as const)
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: args.refs ? "multi_get" : "get", arguments: args },
+          params: {
+            name: args.query ? "query" : args.refs ? "multi_get" : "get",
+            arguments: args,
+          },
         };
         const r = await mcp(
           new Request("https://gate.example/mcp", {
@@ -186,6 +293,14 @@ for (const transport of ["native", "worker"] as const)
         return ((await r.json()) as any).result;
       };
     }
+    const metadata = CallToolResultSchema.parse(
+      await call({ query: "answer", includeSnippets: false }),
+    );
+    assert.equal(metadata.structuredContent, undefined);
+    assert.equal(metadata.content.length, 1);
+    assert.equal(toolPayload(metadata).snippetsIncluded, false);
+    assert.equal(toolPayload(metadata).results[0].ref, ref);
+    assert.equal("snippet" in toolPayload(metadata).results[0], false);
     for (const args of [
       { ref },
       { refs: [ref] },
@@ -730,35 +845,39 @@ test("native failed original downloads recheck authority before releasing diagno
     });
 });
 
-for (const boundary of ["header", "stream"] as const)
-  test(`provider ${boundary} overflow reports its local read limit and cancels`, async (t) => {
-    let cancelled = false;
-    const f = setup(
-      t,
-      async () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(new Uint8Array(2097153));
-            },
-            cancel() {
-              cancelled = true;
-            },
-          }),
-          boundary === "header"
-            ? { headers: { "content-length": "2097153" } }
-            : {},
-        ),
-    );
-    await assert.rejects(
-      f.gateway.execute(f.token.id, "query", { query: "x" }),
-      {
-        code: "CONTENT_TOO_LARGE",
-        diagnostics: { stage: "provider_response", limitBytes: 2097152 },
-      },
-    );
-    assert.equal(cancelled, true);
-  });
+for (const includeSnippets of [undefined, true, false])
+  for (const boundary of ["header", "stream"] as const)
+    test(`provider ${boundary} includeSnippets=${includeSnippets} overflow reports its local read limit and cancels`, async (t) => {
+      let cancelled = false;
+      const f = setup(
+        t,
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(2097153));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            boundary === "header"
+              ? { headers: { "content-length": "2097153" } }
+              : {},
+          ),
+      );
+      await assert.rejects(
+        f.gateway.execute(f.token.id, "query", {
+          query: "x",
+          ...(includeSnippets === undefined ? {} : { includeSnippets }),
+        }),
+        {
+          code: "CONTENT_TOO_LARGE",
+          diagnostics: { stage: "provider_response", limitBytes: 2097152 },
+        },
+      );
+      assert.equal(cancelled, true);
+    });
 
 test("aggregate read output reports the 4 MiB logical tool budget", async (t) => {
   const f = setup(t, async () =>

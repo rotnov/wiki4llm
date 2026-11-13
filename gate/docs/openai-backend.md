@@ -137,13 +137,26 @@ reciprocal-rank ordering (k=60); identical content in distinct repositories stay
 distinct. Cross-workspace ranking retains the existing gate reciprocal-rank policy.
 Filtering can underfill results; exhaustive recall and full context are not promised.
 
+Optional `query.includeSnippets` is a boolean, default `true`. Omitted or `true`
+retains the existing response with full uncut snippets. Explicit `false` omits the
+entire `snippet` field from every result and adds only the top-level
+`snippetsIncluded: false` indicator. References, source provenance, result order,
+scores and retrieval caveats remain unchanged, including for QMD or mixed searches.
+Use this metadata-only option when planning separate source reads: prefer an
+accessible local repository and relative path, report revision differences, and
+use `get` when local tools or sources are unavailable. Metadata identifies
+candidates; read their content before using them as evidence. This projection does
+not change provider requests, the 50-chunk bound, or the 2 MiB provider-response
+read cap. It establishes no latency, cost or answer-quality improvement.
+
 Search does not fetch every document body or invoke an LLM. The 64 KiB logical
-query response budget includes one excerpt and metadata per selected document;
+query response budget includes metadata and, by default, one excerpt per selected document;
 exceeding it returns `CONTENT_TOO_LARGE`, never a clipped result. The document
 limit remains 1-20. Many hits for one file no longer accumulate into an oversized
 result, but a single very large provider excerpt or up to 20 selected documents
 can still exceed that explicit budget. Reduce the result limit or narrow the
-query/workspace; an individually oversized excerpt requires a local source.
+query/workspace, or explicitly request metadata-only discovery before reading the
+selected sources. Metadata alone can also overflow and returns the same error.
 
 Modes set OpenAI `ranking_options.hybrid_search` embedding/text weights:
 

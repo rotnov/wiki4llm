@@ -7,7 +7,7 @@ export function assertInputDefaults(tools: any[]) {
     list_workspaces: { input: {}, defaults: { offset: 0, limit: 20 } },
     query: {
       input: { query: "guide" },
-      defaults: { mode: "hybrid", limit: 10 },
+      defaults: { mode: "hybrid", limit: 10, includeSnippets: true },
     },
     find_documents: {
       input: { workspace: "docs", query: "guide" },
@@ -63,6 +63,7 @@ export function assertParameterGuidance(tools: any[]) {
       workspaces: ["20", "80", "omitted"],
       mode: ["lex", "vec", "hybrid"],
       limit: ["1", "20", "default 10"],
+      includeSnippets: ["boolean", "default true", "false", "metadata"],
     },
     find_documents: {
       workspace: ["exact", "authorized"],
@@ -127,6 +128,9 @@ export function assertParameterGuidance(tools: any[]) {
       "vec",
       "hybrid",
       "default hybrid",
+      "includeSnippets",
+      "default true",
+      "false",
     ],
     find_documents: [
       "OpenAI",

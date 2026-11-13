@@ -192,6 +192,16 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
         .source.kind,
       "local",
     );
+    const metadata = toolPayload(
+      await call("query", { query: "quartz", includeSnippets: false }),
+    );
+    assert.deepEqual(metadata, {
+      ...toolPayload(mixed),
+      results: toolPayload(mixed).results.map(
+        ({ snippet: _snippet, ...rest }: any) => rest,
+      ),
+      snippetsIncluded: false,
+    });
     s.revokeToken(token.id);
     await assert.rejects(client.listTools());
   } finally {
