@@ -27,6 +27,7 @@ export async function mcp(
     ![
       "initialize",
       "notifications/initialized",
+      "ping",
       "tools/list",
       "tools/call",
     ].includes(String((parsed as Record<string, unknown>).method))

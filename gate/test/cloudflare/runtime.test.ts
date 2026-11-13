@@ -252,6 +252,65 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
       },
     );
     await t.test(
+      "authenticated ping uses the SDK without provider access",
+      async () => {
+        const before = requests.length;
+        for (const id of [0, "health-check"]) {
+          const result = await request(
+            "/mcp",
+            { jsonrpc: "2.0", id, method: "ping" },
+            "reader",
+            { accept: "application/json, text/event-stream" },
+          );
+          assert.equal(result.status, 200);
+          assert.deepEqual(await result.json(), {
+            jsonrpc: "2.0",
+            id,
+            result: {},
+          });
+          assert.equal(result.headers.get("mcp-session-id"), null);
+        }
+        assert.equal(requests.length, before);
+        // Ping is transport health, so it must not grant an unmapped reader corpus access.
+        assert.equal((await rpc("list_workspaces")).isError, true);
+        assert.equal(requests.length, before);
+      },
+    );
+    await t.test(
+      "ping retains HTTP authentication and invalid-message guards",
+      async () => {
+        const before = requests.length;
+        const ping = { jsonrpc: "2.0", id: 0, method: "ping" };
+        assert.equal(
+          (
+            await mf.dispatchFetch(origin + "/mcp", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+              },
+              body: JSON.stringify(ping),
+            })
+          ).status,
+          401,
+        );
+        assert.equal((await request("/mcp", undefined, "reader")).status, 405);
+        for (const body of [
+          { ...ping, method: "unknown" },
+          { ...ping, jsonrpc: "1.0" },
+          { ...ping, id: null },
+          { ...ping, params: "invalid" },
+          [ping],
+        ]) {
+          const result = await request("/mcp", body, "reader", {
+            accept: "application/json, text/event-stream",
+          });
+          assert.equal(result.status, 400);
+        }
+        assert.equal(requests.length, before);
+      },
+    );
+    await t.test(
       "explicit independent admin privilege, strict schema and unknown identity denial",
       async () => {
         assert.equal((await rpc("list_workspaces")).isError, true);
@@ -568,6 +627,13 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
             { accept: "application/json, text/event-stream" },
           );
           assert.equal(overflow.status, 429);
+          const ping = await request(
+            "/mcp",
+            { jsonrpc: "2.0", id: 0, method: "ping" },
+            "reader",
+            { accept: "application/json, text/event-stream" },
+          );
+          assert.equal(ping.status, 429);
           assert.equal((await request("/admin/status")).status, 200);
         } finally {
           p.release();

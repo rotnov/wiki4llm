@@ -100,6 +100,7 @@ export async function startServer(
       ![
         "initialize",
         "notifications/initialized",
+        "ping",
         "tools/list",
         "tools/call",
       ].includes(String(message.method))

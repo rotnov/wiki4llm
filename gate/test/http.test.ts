@@ -14,6 +14,72 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { State } from "../src/state.js";
 import { Gateway } from "../src/gateway.js";
 import { startServer } from "../src/http.js";
+
+test("native HTTP ping authenticates and returns empty SDK results without data access", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gate-http-ping-"));
+  const state = new State(dir);
+  state.setPrincipal("reader", { allow: [], deny: [] });
+  const token = state.issueToken("reader", "ping", Date.now() + 60000, {
+    allow: [],
+    deny: [],
+  });
+  const unused = () => assert.fail("ping must not invoke data handlers");
+  const gateway = new Gateway(state, {
+    search: unused,
+    read: unused,
+    status: unused,
+  });
+  gateway.execute = unused;
+  const server = await startServer(state, gateway, 0);
+  try {
+    const headers = {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    };
+    for (const id of [0, "health-check"]) {
+      const body = JSON.stringify({ jsonrpc: "2.0", id, method: "ping" });
+      assert.equal(
+        (await fetch(server.url, { method: "POST", headers, body })).status,
+        401,
+      );
+      const result = await fetch(server.url, {
+        method: "POST",
+        headers: { ...headers, Authorization: `Bearer ${token.secret}` },
+        body,
+      });
+      assert.equal(result.status, 200);
+      assert.deepEqual(await result.json(), { jsonrpc: "2.0", id, result: {} });
+      assert.equal(result.headers.get("mcp-session-id"), null);
+    }
+    const authenticated = {
+      ...headers,
+      Authorization: `Bearer ${token.secret}`,
+    };
+    assert.equal(
+      (await fetch(server.url, { headers: authenticated })).status,
+      405,
+    );
+    for (const body of [
+      { jsonrpc: "2.0", id: 0, method: "unknown" },
+      { jsonrpc: "1.0", id: 0, method: "ping" },
+      { jsonrpc: "2.0", id: null, method: "ping" },
+      { jsonrpc: "2.0", id: 0, method: "ping", params: "invalid" },
+      [{ jsonrpc: "2.0", id: 0, method: "ping" }],
+    ]) {
+      const result = await fetch(server.url, {
+        method: "POST",
+        headers: authenticated,
+        body: JSON.stringify(body),
+      });
+      assert.equal(result.status, 400);
+    }
+  } finally {
+    await server.close();
+    state.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("official MCP client authenticates each request, scopes tools, and cannot reuse a session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "gate-http-")),
     s = new State(dir);
