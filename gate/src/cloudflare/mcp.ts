@@ -1,3 +1,5 @@
+import { toolResult } from "../tool-result.js";
+import { publicError } from "../errors.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -25,6 +27,7 @@ export async function mcp(
     ![
       "initialize",
       "notifications/initialized",
+      "ping",
       "tools/list",
       "tools/call",
     ].includes(String((parsed as Record<string, unknown>).method))
@@ -50,7 +53,7 @@ export async function mcp(
       tools: Object.entries(toolSchemas).map(([name, schema]) => ({
         name,
         description: toolDescriptions[name as keyof typeof toolSchemas],
-        inputSchema: z.toJSONSchema(schema) as any,
+        inputSchema: z.toJSONSchema(schema, { io: "input" }) as any,
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,
@@ -67,17 +70,14 @@ export async function mcp(
         req.params.arguments ?? {},
         signal,
       );
-      return {
-        content: [{ type: "text", text: JSON.stringify(output) }],
-        structuredContent: output,
-      };
+      return toolResult(output);
     } catch (error) {
       return {
         isError: true,
         content: [
           {
             type: "text",
-            text: error instanceof GateError ? error.code : "NOT_FOUND",
+            text: publicError(error),
           },
         ],
       };

@@ -64,7 +64,7 @@ checks. Do not disable these guards to run a dirty or divergent source.
 
 Each collection retains a stable repository identity. Equal filenames across
 repositories are not collisions: preserve collection/repository/path metadata and
-use exact references returned by `query` for `get`, not basename guesses.
+use exact references returned by `query` or `find_documents` for `get`, not basename guesses.
 
 ## Shared GitHub Actions
 
@@ -111,7 +111,7 @@ leave permanent publisher credentials and unrelated environment rules intact.
 
 1. Read back deployment version, authority identity and relevant grants.
 2. Confirm unauthenticated MCP denial with OAuth discovery.
-3. Complete real client OAuth and list all five read-only tools.
+3. Complete real client OAuth and list all six read-only tools.
 4. Query a known phrase; read its returned reference and verify provenance. Exercise
    pagination or `multi_get` where relevant. Compare content in memory; log only
    counts/digests and nonsecret references in protected receipts.

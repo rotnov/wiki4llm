@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { invalid } from "./errors.js";
-import { validateSlug } from "./policy.js";
+import { validateSlug, repositorySchema } from "./policy.js";
 import { validatePath } from "./gateway.js";
 export const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const project = z.string().regex(/^proj_[A-Za-z0-9_-]{1,160}$/);
@@ -53,12 +53,7 @@ const file = z
   .strict();
 const collection = z
   .object({
-    repository: plain.refine(
-      (v) =>
-        !v.startsWith("/") &&
-        !v.includes("\\") &&
-        !v.split("/").some((p) => !p || p === "." || p === ".."),
-    ),
+    repository: repositorySchema,
     branch: plain.nullable(),
     vector_store_id: store,
     repository_commit: commit,

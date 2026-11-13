@@ -164,7 +164,10 @@ async function main() {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = await client!.callTool({ name, arguments: args });
     assert.notEqual(r.isError, true);
-    return r.structuredContent as any;
+    assert.equal(r.structuredContent, undefined);
+    const content = r.content as { type: string; text: string }[];
+    assert.equal(content[0]?.type, "text");
+    return JSON.parse(content[0]!.text);
   };
   const queryReady = async () => {
     const end = Date.now() + 240000;
@@ -183,7 +186,7 @@ async function main() {
   try {
     stage = "initial-mcp";
     await start();
-    assert.equal((await client!.listTools()).tools.length, 5);
+    assert.equal((await client!.listTools()).tools.length, 6);
     checks.push("mcp-initialize-tools");
     const first = await queryReady();
     const refs = first.results.map((r: any) => r.ref) as string[];

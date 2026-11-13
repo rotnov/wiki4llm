@@ -1,4 +1,55 @@
 import assert from "node:assert/strict";
+import { toolSchemas } from "../src/gateway.js";
+
+// Assert wire-required fields independently of the server's Zod parser.
+export function assertInputDefaults(tools: any[]) {
+  const cases = {
+    list_workspaces: { input: {}, defaults: { offset: 0, limit: 20 } },
+    query: {
+      input: { query: "guide" },
+      defaults: { mode: "hybrid", limit: 10, includeSnippets: true },
+    },
+    find_documents: {
+      input: { workspace: "docs", query: "guide" },
+      defaults: { limit: 5 },
+    },
+    get: { input: { ref: "qgdoc:example" }, defaults: { format: "parsed" } },
+    multi_get: {
+      input: { refs: ["qgdoc:example"] },
+      defaults: { format: "parsed" },
+    },
+    status: { input: {}, defaults: {} },
+  };
+  for (const name of Object.keys(cases) as (keyof typeof cases)[]) {
+    const { input, defaults } = cases[name];
+    const schema = tools.find((tool) => tool.name === name).inputSchema;
+    assert.deepEqual(schema.required ?? [], Object.keys(input), name);
+    assert.equal(schema.additionalProperties, false, name);
+    assert.equal(
+      toolSchemas[name].safeParse({ ...input, unknown: true }).success,
+      false,
+      name,
+    );
+    assert.deepEqual(toolSchemas[name].parse(input), { ...input, ...defaults });
+    for (const [field, value] of Object.entries(defaults)) {
+      assert.equal(schema.properties[field].default, value, `${name}.${field}`);
+      assert.equal(
+        toolSchemas[name].safeParse({ ...input, [field]: null }).success,
+        false,
+        `${name}.${field} is optional, not nullable`,
+      );
+    }
+    for (const field of Object.keys(input)) {
+      const missing: Record<string, unknown> = { ...input, ...defaults };
+      delete missing[field];
+      assert.equal(
+        toolSchemas[name].safeParse(missing).success,
+        false,
+        `${name}.${field} is required`,
+      );
+    }
+  }
+}
 
 // Check wire output, including prose retained by connectors that flatten schemas.
 export function assertParameterGuidance(tools: any[]) {
@@ -12,21 +63,35 @@ export function assertParameterGuidance(tools: any[]) {
       workspaces: ["20", "80", "omitted"],
       mode: ["lex", "vec", "hybrid"],
       limit: ["1", "20", "default 10"],
+      includeSnippets: ["boolean", "default true", "false", "metadata"],
+    },
+    find_documents: {
+      workspace: ["exact", "authorized"],
+      query: ["literal", "1", "1024"],
+      repository: ["exact", "case-sensitive", "256"],
+      limit: ["1", "20", "default 5"],
     },
     get: {
-      ref: ["8192", "query"],
+      ref: ["8192", "query", "find_documents"],
       fromLine: ["1", "1000000", "default 1"],
-      maxLines: ["1", "200", "default 80"],
+      maxLines: ["1", "200", "omitted", "all"],
+      format: ["parsed", "default", "original"],
     },
     multi_get: {
-      refs: ["1", "20", "8192"],
-      maxLines: ["1", "200", "default 80"],
+      refs: ["1", "20", "8192", "find_documents"],
+      maxLines: ["1", "200", "omitted", "all"],
+      format: ["parsed", "default", "original"],
     },
     status: { workspaces: ["20", "80", "omitted"] },
   };
   for (const [name, fields] of Object.entries(expected)) {
     const tool = tools.find((t) => t.name === name);
     assert.ok(tool, name);
+    assert.equal(
+      tool.outputSchema,
+      undefined,
+      `${name} uses JSON text content`,
+    );
     for (const [field, terms] of Object.entries(fields)) {
       for (const term of terms) {
         assert.ok(
@@ -63,22 +128,29 @@ export function assertParameterGuidance(tools: any[]) {
       "vec",
       "hybrid",
       "default hybrid",
+      "includeSnippets",
+      "default true",
+      "false",
+    ],
+    find_documents: [
+      "OpenAI",
+      "literal",
+      "workspace",
+      "repository",
+      "limit 1-20",
+      "default 5",
+      "hasMore",
+      "QMD",
     ],
     get: [
       "query",
       "maxLines 1-200",
-      "default 80",
+      "full",
       "fromLine",
       "one-based",
       "default 1",
     ],
-    multi_get: [
-      "authorized",
-      "1-20",
-      "first line",
-      "maxLines 1-200",
-      "default 80",
-    ],
+    multi_get: ["authorized", "1-20", "first line", "maxLines 1-200", "full"],
     status: ["authorized", "workspaces", "omitted", "all", "20"],
   };
   for (const [name, terms] of Object.entries(essential)) {
@@ -88,6 +160,27 @@ export function assertParameterGuidance(tools: any[]) {
         description.includes(term),
         `${name} tool description missing ${term}`,
       );
+  }
+  for (const name of ["query", "get", "multi_get"]) {
+    const description = tools.find((t) => t.name === name).description;
+    for (const term of [
+      "local",
+      "repository",
+      "relative path",
+      "own tools",
+      "revision differences",
+      "source.sha256 hashes original bytes",
+    ])
+      assert.ok(
+        description.includes(term),
+        `${name} missing local-source guidance ${term}`,
+      );
+  }
+  for (const name of ["get", "multi_get"]) {
+    const properties = tools.find((t) => t.name === name).inputSchema
+      .properties;
+    assert.equal(properties.format.default, "parsed");
+    assert.equal(properties.maxLines.default, undefined);
   }
   const list = tools.find((t) => t.name === "list_workspaces");
   assert.equal(list.inputSchema.properties.limit.maximum, 50);

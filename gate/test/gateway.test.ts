@@ -183,13 +183,13 @@ test("oversized document output and unreviewed methods are rejected", () =>
       collection: "docs",
       path: "readme.md",
       title: "Huge",
-      body: "x".repeat(70000),
+      body: "x".repeat(4 * 1024 * 1024 + 1),
     });
     await assert.rejects(
       g.execute(t, "get", {
         ref: encodeReference("amplifier", "generation-1", "docs", "readme.md"),
       }),
-      { code: "INVALID_INPUT" },
+      { code: "CONTENT_TOO_LARGE" },
     );
     await assert.rejects(g.execute(t, "admin.issue_token", {}), {
       code: "INVALID_INPUT",
@@ -315,3 +315,76 @@ test("workspace listing accepts 50, preserves default 20 and paginates authorize
       { code: "INVALID_INPUT" },
     );
   }));
+
+for (const empty of [false, true])
+  test(`QMD metadata projection preserves backend search arguments (empty=${empty})`, () =>
+    fixture(async (_s, g, t, _calls, b) => {
+      const search = b.search.bind(b);
+      const requests: unknown[][] = [];
+      b.search = async (...request) => {
+        requests.push(request.slice(0, 4));
+        return empty ? [] : search(...request);
+      };
+      const full: any = await g.execute(t, "query", args);
+      const metadata = await g.execute(t, "query", {
+        ...args,
+        includeSnippets: false,
+      });
+      assert.deepEqual(requests[0], requests[1]);
+      assert.deepEqual(metadata, {
+        ...full,
+        results: full.results.map(
+          ({ snippet: _snippet, ...rest }: any) => rest,
+        ),
+        snippetsIncluded: false,
+      });
+    }));
+
+test("metadata-only queries still reject oversized metadata", () =>
+  fixture(async (_s, g, t, _calls, b) => {
+    b.search = async () =>
+      Array.from({ length: 20 }, (_, i) => ({
+        collection: "docs",
+        path: "x".repeat(1000) + i + ".md",
+        title: "title".repeat(100),
+        body: "small excerpt",
+        score: 1,
+      }));
+    await assert.rejects(
+      g.execute(t, "query", { ...args, limit: 20, includeSnippets: false }),
+      {
+        code: "CONTENT_TOO_LARGE",
+        diagnostics: { stage: "tool_response", limitBytes: 65536 },
+      },
+    );
+  }));
+
+for (const change of ["token", "grant", "generation", "cancel"] as const)
+  test(`metadata-only queries recheck ${change} after search`, () =>
+    fixture(async (s, g, t, _calls, b) => {
+      const controller = new AbortController();
+      b.search = async () => {
+        if (change === "token") s.revokeToken(t);
+        if (change === "grant") s.setPrincipal("p", { allow: [], deny: [] });
+        if (change === "generation")
+          s.publishGeneration("amplifier", "generation-2");
+        if (change === "cancel") controller.abort();
+        return [];
+      };
+      await assert.rejects(
+        g.execute(
+          t,
+          "query",
+          { ...args, includeSnippets: false },
+          controller.signal,
+        ),
+        {
+          code: {
+            token: "UNAUTHENTICATED",
+            grant: "ACCESS_DENIED",
+            generation: "CONFLICT",
+            cancel: "CANCELLED",
+          }[change],
+        },
+      );
+    }));

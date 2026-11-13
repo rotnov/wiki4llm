@@ -241,7 +241,8 @@ fail atomically. The Node and Durable Object stores share that policy.
 - SQLite snapshot parts are at most 900 KiB of encoded bytes. Atomic metadata,
   digest, part count and ordered chunks detect incomplete/corrupt storage;
   UTF-8 is decoded only after byte reassembly. All SQL values are bound parameters.
-- Existing 64 KiB gateway output, 2 MiB provider response and provider timeouts
+- Gateway logical output limits (64 KiB query/discovery/status; 4 MiB reads),
+  2 MiB provider responses and provider timeouts
   remain. Parsed-content pagination fails closed. Search still considers only
   the first 50 chunks per collection and is explicitly incomplete.
 

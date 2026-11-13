@@ -1,3 +1,4 @@
+import { toolPayload } from "./tool-payload.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -112,10 +113,10 @@ test("official HTTP client retrieves real indexed data and denies foreign refere
       name: "query",
       arguments: { query: "quartz", mode: "lex" },
     });
-    assert.equal(result.structuredContent.results.length, 1);
-    const ref = result.structuredContent.results[0].ref;
+    assert.equal(toolPayload(result).results.length, 1);
+    const ref = toolPayload(result).results[0].ref;
     const doc: any = await client.callTool({ name: "get", arguments: { ref } });
-    assert.match(doc.structuredContent.text, /amplifier/);
+    assert.match(toolPayload(doc).text, /amplifier/);
     const denied: any = await client.callTool({
       name: "get",
       arguments: {

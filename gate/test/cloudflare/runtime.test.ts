@@ -1,3 +1,4 @@
+import { toolPayload } from "../tool-payload.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
@@ -251,6 +252,65 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
       },
     );
     await t.test(
+      "authenticated ping uses the SDK without provider access",
+      async () => {
+        const before = requests.length;
+        for (const id of [0, "health-check"]) {
+          const result = await request(
+            "/mcp",
+            { jsonrpc: "2.0", id, method: "ping" },
+            "reader",
+            { accept: "application/json, text/event-stream" },
+          );
+          assert.equal(result.status, 200);
+          assert.deepEqual(await result.json(), {
+            jsonrpc: "2.0",
+            id,
+            result: {},
+          });
+          assert.equal(result.headers.get("mcp-session-id"), null);
+        }
+        assert.equal(requests.length, before);
+        // Ping is transport health, so it must not grant an unmapped reader corpus access.
+        assert.equal((await rpc("list_workspaces")).isError, true);
+        assert.equal(requests.length, before);
+      },
+    );
+    await t.test(
+      "ping retains HTTP authentication and invalid-message guards",
+      async () => {
+        const before = requests.length;
+        const ping = { jsonrpc: "2.0", id: 0, method: "ping" };
+        assert.equal(
+          (
+            await mf.dispatchFetch(origin + "/mcp", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+              },
+              body: JSON.stringify(ping),
+            })
+          ).status,
+          401,
+        );
+        assert.equal((await request("/mcp", undefined, "reader")).status, 405);
+        for (const body of [
+          { ...ping, method: "unknown" },
+          { ...ping, jsonrpc: "1.0" },
+          { ...ping, id: null },
+          { ...ping, params: "invalid" },
+          [ping],
+        ]) {
+          const result = await request("/mcp", body, "reader", {
+            accept: "application/json, text/event-stream",
+          });
+          assert.equal(result.status, 400);
+        }
+        assert.equal(requests.length, before);
+      },
+    );
+    await t.test(
       "explicit independent admin privilege, strict schema and unknown identity denial",
       async () => {
         assert.equal((await rpc("list_workspaces")).isError, true);
@@ -280,10 +340,9 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           (await rpc("list_workspaces", {}, "operator")).isError,
           true,
         );
-        assert.deepEqual(
-          (await rpc("list_workspaces")).structuredContent.workspaces,
-          [{ id: "example", indexed: true }],
-        );
+        assert.deepEqual(toolPayload(await rpc("list_workspaces")).workspaces, [
+          { id: "example", indexed: true },
+        ]);
       },
     );
     await t.test(
@@ -311,7 +370,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         );
         try {
           await client.connect(transport);
-          assert.equal((await client.listTools()).tools.length, 5);
+          assert.equal((await client.listTools()).tools.length, 6);
           for (let i = 0; i < 3; i++)
             assert.equal(
               (await client.callTool({ name: "status", arguments: {} }))
@@ -326,8 +385,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
     await t.test(
       "query provenance, exact get, forbidden mixed multi_get has zero upstream calls",
       async () => {
-        const result = (await rpc("query", { query: "fixture" }))
-          .structuredContent;
+        const result = toolPayload(await rpc("query", { query: "fixture" }));
         assert.equal(result.results.length, 2);
         assert.notEqual(result.results[0].ref, result.results[1].ref);
         assert.notEqual(
@@ -335,8 +393,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           result.results[1].source.repository,
         );
         assert.equal(
-          (await rpc("get", { ref: result.results[0].ref })).structuredContent
-            .text,
+          toolPayload(await rpc("get", { ref: result.results[0].ref })).text,
           "line one\nline two",
         );
         const foreign =
@@ -376,9 +433,9 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         p.release();
         assert.equal((await pending).isError, true);
         await principal();
-        const refs = (
-          await rpc("query", { query: "fixture" })
-        ).structuredContent.results.map((x: any) => x.ref);
+        const refs = toolPayload(
+          await rpc("query", { query: "fixture" }),
+        ).results.map((x: any) => x.ref);
         p = pause();
         pending = rpc("multi_get", { refs });
         await p.entered;
@@ -570,6 +627,13 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
             { accept: "application/json, text/event-stream" },
           );
           assert.equal(overflow.status, 429);
+          const ping = await request(
+            "/mcp",
+            { jsonrpc: "2.0", id: 0, method: "ping" },
+            "reader",
+            { accept: "application/json, text/event-stream" },
+          );
+          assert.equal(ping.status, 429);
           assert.equal((await request("/admin/status")).status, 200);
         } finally {
           p.release();
@@ -772,16 +836,16 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           ...Array.from({ length: 18 }, (_, i) => `large-${i}`),
         ];
         assert.equal(
-          (await rpc("status", { workspaces: ids })).structuredContent
-            .workspaces.length,
+          toolPayload(await rpc("status", { workspaces: ids })).workspaces
+            .length,
           20,
         );
         const query = await rpc("query", { query: "large", workspaces: ids });
-        assert.equal(query.structuredContent.searchedWorkspaces.length, 20);
+        assert.equal(toolPayload(query).searchedWorkspaces.length, 20);
         await mf.dispose();
         mf = new Miniflare(options());
         assert.equal(
-          (await rpc("status", { workspaces: ["large"] })).structuredContent
+          toolPayload(await rpc("status", { workspaces: ["large"] }))
             .workspaces[0].documents,
           10000,
         );
@@ -805,7 +869,7 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
         await mf.dispose();
         mf = new Miniflare(options());
         assert.equal(
-          (await rpc("status", { workspaces: ["example"] })).structuredContent
+          toolPayload(await rpc("status", { workspaces: ["example"] }))
             .workspaces[0].id,
           "example",
         );
@@ -874,6 +938,98 @@ test("real workerd Access, SQLite authority, publication, MCP and independent op
           (await rpc("status", { workspaces: ["large"] })).isError,
           true,
         );
+      },
+    );
+    await t.test(
+      "published-path discovery uses hosted snapshots and zero provider requests",
+      async () => {
+        const count = requests.length;
+        const wire = await rpc("find_documents", {
+          workspace: "example",
+          query: " readme.MD ",
+        });
+        const found = toolPayload(wire);
+        assert.equal(wire.structuredContent, undefined);
+        assert.equal(wire.content.length, 1);
+        assert.equal(found.results.length, 2);
+        assert.equal(found.hasMore, false);
+        for (const d of found.results) {
+          assert.equal(d.path, "README.md");
+          assert.equal(d.source.lineBasis, "none");
+          assert.equal(d.body, undefined);
+          assert.equal(d.snippet, undefined);
+        }
+        assert.equal(requests.length, count);
+        for (const workspace of ["hidden", "missing"]) {
+          await principal("reader", ["example"]);
+          const denied = await rpc("find_documents", {
+            workspace,
+            query: "README",
+          });
+          assert.equal(denied.content[0].text, "ACCESS_DENIED");
+        }
+        await principal();
+        const ref = found.results[0].ref;
+        assert.equal(
+          toolPayload(await rpc("get", { ref })).text,
+          "line one\nline two",
+        );
+        assert.equal(
+          toolPayload(await rpc("multi_get", { refs: [ref] })).documents.length,
+          1,
+        );
+        const m = structuredClone(fixture);
+        const c = m.collections.guide,
+          template = c.files["README.md"];
+        c.files = Object.fromEntries(
+          Array.from({ length: 21 }, (_, i) => {
+            const path = `nested-${i}/README.md`;
+            return [path, { ...template, path, file_id: `file-extra-${i}` }];
+          }),
+        );
+        await publish("discovery", m);
+        const n = requests.length;
+        const capped = toolPayload(
+          await rpc("find_documents", {
+            workspace: "discovery",
+            query: "README.md",
+            limit: 20,
+          }),
+        );
+        assert.equal(capped.results.length, 20);
+        assert.equal(capped.hasMore, true);
+        const target = toolPayload(
+          await rpc("find_documents", {
+            workspace: "discovery",
+            query: "README.md",
+            repository: "example/second",
+          }),
+        );
+        assert.equal(target.results.length, 1);
+        assert.equal(target.hasMore, false);
+        assert.equal(target.results[0].source.repository, "example/second");
+        assert.deepEqual(
+          toolPayload(
+            await rpc("find_documents", {
+              workspace: "discovery",
+              query: "README.md",
+              repository: "unknown",
+            }),
+          ),
+          { results: [], hasMore: false },
+        );
+        await publish("discovery", {
+          ...m,
+          generation: 2,
+          publication_id: crypto.randomUUID(),
+        });
+        const stale = await rpc("get", { ref: target.results[0].ref });
+        assert.equal(stale.content[0].text, "NOT_FOUND");
+        await principal("reader", ["example"]);
+        const denied = await rpc("get", { ref: target.results[0].ref });
+        assert.equal(denied.content[0].text, "ACCESS_DENIED");
+        await principal();
+        assert.equal(requests.length, n);
       },
     );
   } finally {

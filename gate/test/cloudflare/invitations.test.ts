@@ -1,3 +1,4 @@
+import { toolPayload } from "../tool-payload.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -202,13 +203,12 @@ test("invitation activation binds only its authenticated recipient and preserves
     assert.equal(activated.status, 200, await activated.clone().text());
     const result = (await activated.json()) as any;
     assert.deepEqual(result.workspaces, ["example"]);
-    assert.deepEqual(
-      (await rpc("list_workspaces")).structuredContent.workspaces,
-      [{ id: "example", indexed: true }],
-    );
-    const query = (await rpc("query", { query: "fixture" })).structuredContent;
+    assert.deepEqual(toolPayload(await rpc("list_workspaces")).workspaces, [
+      { id: "example", indexed: true },
+    ]);
+    const query = toolPayload(await rpc("query", { query: "fixture" }));
     assert.equal(
-      (await rpc("get", { ref: query.results[0].ref })).structuredContent.text,
+      toolPayload(await rpc("get", { ref: query.results[0].ref })).text,
       "invited reader document",
     );
     assert.equal(

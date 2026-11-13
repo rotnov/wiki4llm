@@ -27,6 +27,25 @@ tests. Tests use temporary Git sources and synthetic provider/authentication dat
 No OpenAI key, Cloudflare account or live document upload is required. The optional
 native QMD model and Docker qualification commands are documented in `gate/README.md`.
 
+For retrieval diagnostics, validate the metadata reducer in the actual orchestration
+runtime before live calls with synthetic Unicode success, plain-text `isError`,
+malformed JSON, `structuredContent: null` client wrappers (not a second payload), and
+thrown tool errors; cover allowlisted error codes without assuming runtime globals.
+Raw tool logs may retain full output while host truncation changes live model history.
+Validate effective outer-output and history budgets and gap-free bounded content
+after that layer; raw completeness or larger inner budgets alone are insufficient.
+Caller protocols must preserve mandatory committed project guidance, including
+required overlays, while distinguishing it from personal or session memory.
+Record parent phase-request timestamps at dispatch; never reconstruct missing
+request times from task-start events.
+Persist each attempt's outcome,
+error code, error message and timing, with secrets redacted and successful document
+bodies excluded. Keep missing coverage distinct from measured zero coverage.
+Predeclare the attempt cap and provenance (source revision, runtime, configuration
+and input identifiers) before running. Retain invalid attempts and their failure
+evidence; do not selectively rerun or omit attempts to improve reported results.
+Store diagnostic receipts only in the ignored local locations described below.
+
 Before publishing a commit, stage the intended files and inspect its immutable
 payload:
 

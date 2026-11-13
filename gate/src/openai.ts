@@ -1,15 +1,23 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type {
   Backend,
   Document,
+  DocumentMetadata,
+  DocumentDiscovery,
   Hit,
   SearchMode,
   IndexingStatus,
+  ReadFormat,
 } from "./backend.js";
 import type { Workspace } from "./state-contract.js";
 import type { OpenAISnapshot } from "./manifest.js";
-import { GateError } from "./errors.js";
-const MAX_RESPONSE = 2 * 1024 * 1024;
+import {
+  ContentTooLargeError,
+  GateError,
+  OriginalDownloadError,
+} from "./errors.js";
+const MAX_RESPONSE = 2097152;
 const textParts = z
   .array(z.object({ type: z.literal("text"), text: z.string() }))
   .max(1000);
@@ -18,6 +26,43 @@ const page = z.object({
   has_more: z.boolean(),
   next_page: z.string().max(256).nullable().optional(),
 });
+// The enclosing request deadline also bounds diagnostic reads. Never log the body.
+async function originalFailure(
+  response: Response,
+): Promise<OriginalDownloadError> {
+  let body: unknown;
+  const reader = response.body?.getReader();
+  if (reader) {
+    try {
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 8192) break;
+        chunks.push(value);
+      }
+      if (size <= 8192)
+        body = JSON.parse(
+          new TextDecoder("utf-8", { fatal: true }).decode(
+            Buffer.concat(chunks),
+          ),
+        );
+    } catch {
+      // Malformed, oversized or unavailable diagnostics never replace the failure.
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  return new OriginalDownloadError(
+    response.status,
+    response.headers.get("x-request-id"),
+    body,
+  );
+}
+
 export interface OpenAIOptions {
   // Programmatic test seam only; never exposed by CLI, persisted config or MCP.
   transport?: (url: string, init: RequestInit) => Promise<Response>;
@@ -56,6 +101,7 @@ export class OpenAIBackend implements Backend {
     path: string,
     signal: AbortSignal,
     body?: unknown,
+    original = false,
   ): Promise<unknown> {
     if (signal.aborted) throw new GateError("CANCELLED", "Request cancelled");
     const key = this.env[s.credentialEnv];
@@ -101,12 +147,20 @@ export class OpenAIBackend implements Backend {
             },
           );
           if (!response.ok || response.redirected) {
+            if (original) throw await originalFailure(response);
             await response.body?.cancel();
             throw new GateError("NOT_FOUND", "OpenAI request failed");
           }
+          if (
+            response.status !== 200 ||
+            response.headers.has("content-range")
+          ) {
+            await response.body?.cancel();
+            throw new GateError("INCOMPLETE_CONTENT");
+          }
           if (Number(response.headers.get("content-length")) > MAX_RESPONSE) {
             await response.body?.cancel();
-            throw new GateError("NOT_FOUND", "OpenAI response exceeds limit");
+            throw new ContentTooLargeError("provider_response", MAX_RESPONSE);
           }
           if (!response.body)
             throw new GateError("NOT_FOUND", "Invalid OpenAI response");
@@ -119,9 +173,9 @@ export class OpenAIBackend implements Backend {
               if (done) break;
               size += value.byteLength;
               if (size > MAX_RESPONSE)
-                throw new GateError(
-                  "NOT_FOUND",
-                  "OpenAI response exceeds limit",
+                throw new ContentTooLargeError(
+                  "provider_response",
+                  MAX_RESPONSE,
                 );
               chunks.push(value);
             }
@@ -129,10 +183,10 @@ export class OpenAIBackend implements Backend {
             await reader.cancel().catch(() => {});
             reader.releaseLock();
           }
+          const bytes = Buffer.concat(chunks);
+          if (original) return bytes;
           return JSON.parse(
-            new TextDecoder("utf-8", { fatal: true }).decode(
-              Buffer.concat(chunks),
-            ),
+            new TextDecoder("utf-8", { fatal: true }).decode(bytes),
           );
         })(),
       ]);
@@ -149,19 +203,17 @@ export class OpenAIBackend implements Backend {
       abort.abort();
     }
   }
-  private document(
+  private metadata(
     s: OpenAISnapshot,
     name: string,
     path: string,
-    body: string,
-  ): Document {
+  ): DocumentMetadata {
     const c = s.manifest.collections[name]!,
       f = c.files[path]!;
     return {
       collection: name,
       path,
       title: path.split("/").at(-1)!,
-      body,
       source: {
         kind: "openai",
         repository: c.repository,
@@ -171,9 +223,71 @@ export class OpenAIBackend implements Backend {
         publicationId: s.manifest.publication_id,
         sha256: f.sha256,
         fileKind: f.kind,
-        lineBasis: "parsed-text",
+        lineBasis: "none",
         ...(f.origin ? { origin: f.origin } : {}),
       },
+    };
+  }
+  private document(
+    s: OpenAISnapshot,
+    name: string,
+    path: string,
+    body: string,
+  ): Document {
+    const metadata = this.metadata(s, name, path);
+    return {
+      ...metadata,
+      body,
+      source: { ...metadata.source!, lineBasis: "parsed-text" },
+    };
+  }
+  async findDocuments(
+    w: Workspace,
+    query: string,
+    repository: string | undefined,
+    limit: number,
+    signal: AbortSignal,
+  ): Promise<DocumentDiscovery> {
+    if (signal.aborted) throw new GateError("CANCELLED");
+    const snapshot = this.snapshot(w),
+      needle = query.toLowerCase();
+    const matches: {
+      repository: string;
+      collection: string;
+      path: string;
+      rank: number;
+    }[] = [];
+    for (const [collection, c] of Object.entries(
+      snapshot.manifest.collections,
+    )) {
+      if (repository !== undefined && c.repository !== repository) continue;
+      for (const path of Object.keys(c.files)) {
+        if (!path.toLowerCase().includes(needle)) continue;
+        const basename = path.split("/").at(-1)!.toLowerCase();
+        matches.push({
+          repository: c.repository,
+          collection,
+          path,
+          rank: basename === needle ? 0 : basename.includes(needle) ? 1 : 2,
+        });
+      }
+    }
+    const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    matches.sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        compare(a.repository, b.repository) ||
+        compare(a.collection, b.collection) ||
+        compare(a.path, b.path),
+    );
+    if (signal.aborted) throw new GateError("CANCELLED");
+    return {
+      results: matches
+        .slice(0, limit)
+        .map(({ collection, path }) =>
+          this.metadata(snapshot, collection, path),
+        ),
+      hasMore: matches.length > limit,
     };
   }
   async search(
@@ -252,6 +366,7 @@ export class OpenAIBackend implements Backend {
     collection: string,
     path: string,
     signal: AbortSignal,
+    format: ReadFormat = "parsed",
   ): Promise<Document | undefined> {
     const s = this.snapshot(w);
     if (!Object.hasOwn(s.manifest.collections, collection)) return undefined;
@@ -259,6 +374,43 @@ export class OpenAIBackend implements Backend {
     if (!Object.hasOwn(c.files, path)) return undefined;
     const f = c.files[path]!;
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
+    if (format === "original") {
+      const bytes = (await this.request(
+        s,
+        `/files/${f.file_id}/content`,
+        bounded,
+        undefined,
+        true,
+      )) as Buffer;
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (sha256 !== f.sha256) throw new GateError("CONTENT_MISMATCH");
+      const binary = f.preprocessing === "pdf-native-v1";
+      let body = "";
+      if (!binary) {
+        try {
+          // Preserve the UTF-8 BOM as a character so re-encoding is byte-faithful.
+          body = new TextDecoder("utf-8", {
+            fatal: true,
+            ignoreBOM: true,
+          }).decode(bytes);
+        } catch {
+          throw new GateError("UNSUPPORTED_FORMAT");
+        }
+      }
+      const doc = this.document(s, collection, path, body);
+      doc.source!.lineBasis = binary ? "none" : "original-text";
+      doc.original = {
+        mimeType: binary
+          ? "application/pdf"
+          : f.kind === "md"
+            ? "text/markdown; charset=utf-8"
+            : "text/plain; charset=utf-8",
+        byteLength: bytes.length,
+        sha256,
+        ...(binary ? { blob: bytes.toString("base64") } : {}),
+      };
+      return doc;
+    }
     const raw = await this.request(
       s,
       `/vector_stores/${c.vector_store_id}/files/${f.file_id}/content`,
@@ -266,20 +418,26 @@ export class OpenAIBackend implements Backend {
     );
     const parsed = page.safeParse(raw);
     if (!parsed.success)
-      throw new GateError("NOT_FOUND", "Invalid parsed content response");
+      throw new GateError(
+        "UNSUPPORTED_CONTENT",
+        "Invalid parsed content response",
+      );
     // The published content API does not specify a continuation request parameter.
     // Refuse partial documents until that protocol is qualified against the provider.
     if (parsed.data.has_more)
       throw new GateError(
-        "NOT_FOUND",
+        "INCOMPLETE_CONTENT",
         "Parsed content pagination is not supported",
       );
     const content = textParts.safeParse(parsed.data.data);
     if (!content.success)
-      throw new GateError("NOT_FOUND", "Invalid parsed content response");
+      throw new GateError(
+        "UNSUPPORTED_CONTENT",
+        "Invalid parsed content response",
+      );
     const body = content.data.map((p) => p.text).join("\n");
     if (Buffer.byteLength(body) > MAX_RESPONSE)
-      throw new GateError("NOT_FOUND", "Parsed content exceeds limit");
+      throw new ContentTooLargeError("parsed_content", MAX_RESPONSE);
     return this.document(s, collection, path, body);
   }
   async status(

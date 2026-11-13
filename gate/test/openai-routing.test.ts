@@ -1,3 +1,4 @@
+import { toolPayload } from "./tool-payload.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -153,7 +154,7 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
         requestInit: { headers: { Authorization: "Bearer " + token.secret } },
       }),
     );
-    assert.equal((await client.listTools()).tools.length, 5);
+    assert.equal((await client.listTools()).tools.length, 6);
     const call = async (name: string, args: any = {}) =>
       (await client.callTool({ name, arguments: args })) as any;
     const first = await call("query", {
@@ -161,14 +162,14 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
       workspaces: ["docs"],
     });
     assert.equal(first.isError, undefined);
-    assert.equal(first.structuredContent.results.length, 2);
+    assert.equal(toolPayload(first).results.length, 2);
     assert.equal(opens, 0);
-    const ref = first.structuredContent.results[0].ref;
+    const ref = toolPayload(first).results[0].ref;
     const got = await call("get", { ref });
-    assert.equal(got.structuredContent.source.lineBasis, "parsed-text");
-    assert.equal(got.structuredContent.totalLines, 2);
+    assert.equal(toolPayload(got).source.lineBasis, "parsed-text");
+    assert.equal(toolPayload(got).totalLines, 2);
     const status = await call("status", { workspaces: ["docs"] });
-    assert.equal(status.structuredContent.workspaces[0].vectors, null);
+    assert.equal(toolPayload(status).workspaces[0].vectors, null);
     const other = new State(dir);
     try {
       other.importOpenAI("docs", JSON.stringify(fixture()), binding);
@@ -184,13 +185,23 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
     assert.equal((await call("get", { ref })).isError, true);
     assert.equal(requests, n);
     const mixed = await call("query", { query: "quartz" });
-    assert.equal(mixed.structuredContent.results.length, 3);
+    assert.equal(toolPayload(mixed).results.length, 3);
     assert.equal(opens, 1);
     assert.equal(
-      mixed.structuredContent.results.find((r: any) => r.workspace === "local")
+      toolPayload(mixed).results.find((r: any) => r.workspace === "local")
         .source.kind,
       "local",
     );
+    const metadata = toolPayload(
+      await call("query", { query: "quartz", includeSnippets: false }),
+    );
+    assert.deepEqual(metadata, {
+      ...toolPayload(mixed),
+      results: toolPayload(mixed).results.map(
+        ({ snippet: _snippet, ...rest }: any) => rest,
+      ),
+      snippetsIncluded: false,
+    });
     s.revokeToken(token.id);
     await assert.rejects(client.listTools());
   } finally {

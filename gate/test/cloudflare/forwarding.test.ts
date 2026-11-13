@@ -1,3 +1,4 @@
+import { toolPayload } from "../tool-payload.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -242,10 +243,10 @@ test("forwarded human assertions retain issuer isolation and cannot grant transp
       200,
     );
     const oldResult = (await (await call(oldUser)).json()) as any;
-    assert.deepEqual(oldResult.result.structuredContent.workspaces, []);
+    assert.deepEqual(toolPayload(oldResult.result).workspaces, []);
     const newResult = (await (await call(bridge, human)).json()) as any;
     assert.deepEqual(
-      newResult.result.structuredContent.workspaces.map((w: any) => w.id),
+      toolPayload(newResult.result).workspaces.map((w: any) => w.id),
       ["docs"],
     );
     const before = await (await request("/admin/status")).json();
@@ -253,9 +254,9 @@ test("forwarded human assertions retain issuer isolation and cannot grant transp
     mf = new Miniflare(options);
     assert.deepEqual(await (await request("/admin/status")).json(), before);
     assert.deepEqual(
-      (
-        (await (await call(bridge, human)).json()) as any
-      ).result.structuredContent.workspaces.map((w: any) => w.id),
+      toolPayload(
+        ((await (await call(bridge, human)).json()) as any).result,
+      ).workspaces.map((w: any) => w.id),
       ["docs"],
     );
     assert.equal(
@@ -266,7 +267,7 @@ test("forwarded human assertions retain issuer isolation and cannot grant transp
     const revoked = (await (await call(bridge, human)).json()) as any;
     assert.equal(revoked.result.isError, true);
     assert.deepEqual(
-      ((await (await call(oldUser)).json()) as any).result.structuredContent
+      toolPayload(((await (await call(oldUser)).json()) as any).result)
         .workspaces,
       [],
     );
