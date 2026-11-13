@@ -46,6 +46,17 @@ export interface DocumentDiscovery {
 export interface Hit extends Document {
   score: number;
 }
+export interface SearchOptions {
+  rewriteQuery?: boolean;
+}
+export interface EffectiveQuery {
+  collection: string;
+  search_query: string[] | null;
+}
+export interface SearchResult {
+  hits: Hit[];
+  effectiveQueries?: EffectiveQuery[];
+}
 export interface Backend {
   findDocuments?(
     workspace: Workspace,
@@ -60,7 +71,8 @@ export interface Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
-  ): Promise<Hit[]>;
+    options?: SearchOptions,
+  ): Promise<SearchResult>;
   read(
     workspace: Workspace,
     collection: string,

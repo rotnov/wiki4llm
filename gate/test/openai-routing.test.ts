@@ -125,15 +125,17 @@ test("official MCP SDK consumes producer fixture with lazy mixed backends, persi
     opens++;
     return {
       async search() {
-        return [
-          {
-            collection: "local",
-            path: "README.md",
-            title: "Local",
-            body: "local quartz",
-            score: 1,
-          },
-        ];
+        return {
+          hits: [
+            {
+              collection: "local",
+              path: "README.md",
+              title: "Local",
+              body: "local quartz",
+              score: 1,
+            },
+          ],
+        };
       },
       async read() {
         return undefined;

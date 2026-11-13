@@ -53,7 +53,7 @@ test("manifest and MCP metadata distinguish generated files from literal Git blo
     5,
     new AbortController().signal,
   );
-  assert.deepEqual(results[0]!.source!.origin, generated);
+  assert.deepEqual(results.hits[0]!.source!.origin, generated);
 });
 
 test("LFS origin requires the uploaded SHA and derived origins require a source commit", () => {

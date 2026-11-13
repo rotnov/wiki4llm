@@ -11,6 +11,13 @@ export function assertParameterGuidance(tools: any[]) {
       query: ["1", "4096"],
       workspaces: ["20", "80", "omitted"],
       mode: ["lex", "vec", "hybrid"],
+      rewrite_query: [
+        "boolean",
+        "default false",
+        "OpenAI",
+        "QMD",
+        "effectiveQueries",
+      ],
       limit: ["1", "20", "default 10"],
     },
     find_documents: {
@@ -76,6 +83,9 @@ export function assertParameterGuidance(tools: any[]) {
       "vec",
       "hybrid",
       "default hybrid",
+      "rewrite_query",
+      "false",
+      "OpenAI-only",
     ],
     find_documents: [
       "OpenAI",
@@ -127,6 +137,10 @@ export function assertParameterGuidance(tools: any[]) {
     assert.equal(properties.format.default, "parsed");
     assert.equal(properties.maxLines.default, undefined);
   }
+  const query = tools.find((t) => t.name === "query");
+  assert.equal(query.inputSchema.properties.rewrite_query.type, "boolean");
+  assert.equal(query.inputSchema.properties.rewrite_query.default, false);
+  assert.ok(!query.inputSchema.required?.includes("rewrite_query"));
   const list = tools.find((t) => t.name === "list_workspaces");
   assert.equal(list.inputSchema.properties.limit.maximum, 50);
   assert.equal(list.inputSchema.properties.limit.default, 20);

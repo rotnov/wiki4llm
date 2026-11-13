@@ -11,7 +11,14 @@ import {
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { Backend, Document, Hit, SearchMode } from "./backend.js";
+import type {
+  Backend,
+  Document,
+  Hit,
+  SearchMode,
+  SearchOptions,
+  SearchResult,
+} from "./backend.js";
 import type { Workspace } from "./state.js";
 import { validateSlug } from "./policy.js";
 import { validatePath } from "./gateway.js";
@@ -191,7 +198,9 @@ export class QmdBackend implements Backend {
     mode: SearchMode,
     limit: number,
     signal: AbortSignal,
-  ): Promise<Hit[]> {
+    options?: SearchOptions,
+  ): Promise<SearchResult> {
+    if (options?.rewriteQuery) throw new GateError("UNSUPPORTED_OPERATION");
     signal.throwIfAborted();
     const store = this.store(w);
     const results =
@@ -213,7 +222,7 @@ export class QmdBackend implements Backend {
       if (!doc) throw new Error("Missing QMD document");
       hits.push({ ...doc, score: Number(result.score) });
     }
-    return hits;
+    return { hits };
   }
   async status(
     w: Workspace,

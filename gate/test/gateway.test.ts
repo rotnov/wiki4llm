@@ -27,7 +27,7 @@ async function fixture(
   const backend: Backend = {
     async search(w) {
       calls.push(w.id);
-      return [{ ...doc, score: 99 }];
+      return { hits: [{ ...doc, score: 99 }] };
     },
     async read(w, _c, path) {
       calls.push(w.id);
@@ -159,7 +159,7 @@ test("revoking a token during a slow query prevents releasing its result", () =>
     const pending = g.execute(t, "query", args);
     await started;
     s.revokeToken(t);
-    finish([]);
+    finish({ hits: [] });
     await assert.rejects(pending, { code: "UNAUTHENTICATED" });
   }));
 test("removing workspace grants during a query prevents releasing its result", () =>
@@ -174,7 +174,7 @@ test("removing workspace grants during a query prevents releasing its result", (
     const pending = g.execute(t, "query", args);
     await started;
     s.setPrincipal("p", { allow: ["dsx"], deny: [] });
-    finish([]);
+    finish({ hits: [] });
     await assert.rejects(pending, { code: "ACCESS_DENIED" });
   }));
 test("oversized document output and unreviewed methods are rejected", () =>
@@ -243,7 +243,7 @@ test("multi_get pins one workspace snapshot across concurrent publication", asyn
     } as unknown as State;
     const gateway = new Gateway(state, {
       async search() {
-        return [];
+        return { hits: [] };
       },
       async status() {
         return { documents: 1, vectors: 0 };

@@ -158,6 +158,28 @@ benchmark. The producer qualification accepted all three mappings against a real
 synthetic project on 2026-11-08; this change's deterministic tests validate request
 construction. Live gate qualification is a separate operator-run step.
 
+### Optional native query rewriting
+
+`query.rewrite_query` is an optional boolean, default `false`. Omit it or pass
+`false` to retain the existing provider requests and result envelope. With `true`,
+all selected workspaces must use OpenAI; a QMD or mixed selection returns
+`UNSUPPORTED_OPERATION` before any provider search or native initialization.
+Authorization of the entire selection still precedes that check.
+
+The gate forwards `rewrite_query: true` to each existing collection search without
+changing filters, ranking weights, result limits, deadlines or retries. Only this
+opt-in response adds top-level `effectiveQueries`, one entry per searched
+workspace/collection: `{workspace, collection, search_query}`. `search_query` is
+the provider's effective-query array, accepted only as 1-8 nonempty strings of at
+most 4096 characters each. The combined JSON-encoded arrays are limited to 4096
+UTF-8 bytes across the entire request. Missing, malformed or over-budget arrays
+become `null`; they are never replaced with a guessed query, clipped or retried.
+The normal response budget and delivery-time authorization/generation checks also
+apply to these diagnostics. No diagnostic field is added when rewriting is off.
+
+The [provider documents native rewriting](https://developers.openai.com/api/docs/guides/retrieval#query-rewriting),
+but this opt-in plumbing does not establish relevance, latency or cost gains.
+
 ## Document representations
 
 `get(ref, format="parsed")` and `multi_get(refs, format="parsed")` default to the
